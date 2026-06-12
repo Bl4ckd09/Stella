@@ -47,7 +47,7 @@ const CHUNK_ROWS = Number(process.env.CH_CHUNK_ROWS || 200_000);
 
 async function copyChunk(client: import("pg").PoolClient, lines: string[]): Promise<void> {
   const stream = client.query(
-    copyFrom(`copy companies_house
+    copyFrom(`copy companies_staging
       (company_number, name, postcode, status, date_of_creation, sic1, sic2, address)
       from stdin with (format csv)`),
   );
@@ -71,6 +71,13 @@ async function main() {
     await client.query("set idle_in_transaction_session_timeout = 0");
     console.log(`Truncating companies_house; loading in ${CHUNK_ROWS.toLocaleString()}-row chunks …`);
     await client.query("truncate companies_house");
+    // CH "AsOneFile" contains duplicate company_numbers; stage into an unlogged
+    // table (no PK, minimal WAL) then dedupe into the real table. Mirrors the
+    // SQLite original's INSERT OR REPLACE.
+    await client.query("drop table if exists companies_staging");
+    await client.query(`create unlogged table companies_staging (
+      company_number text, name text, postcode text, status text,
+      date_of_creation text, sic1 text, sic2 text, address text)`);
 
     const parser = createReadStream(CSV).pipe(
       parse({ columns: (header: string[]) => header.map((h) => h.trim()), skip_empty_lines: true, relax_quotes: true }),
@@ -115,8 +122,19 @@ async function main() {
       count += chunk.length;
     }
 
+    const staged = await client.query("select count(*)::int as n from companies_staging");
+    console.log(`Staged ${staged.rows[0].n.toLocaleString()} rows; deduping into companies_house …`);
+    await client.query(`insert into companies_house
+      (company_number, name, postcode, status, date_of_creation, sic1, sic2, address)
+      select distinct on (company_number)
+        company_number, name, postcode, status, date_of_creation, sic1, sic2, address
+      from companies_staging
+      order by company_number
+      on conflict (company_number) do nothing`);
+    await client.query("drop table companies_staging");
+
     const { rows } = await client.query("select count(*)::int as n from companies_house");
-    console.log(`Loaded ${rows[0].n.toLocaleString()} companies (skipped ${skipped.toLocaleString()} with no postcode).`);
+    console.log(`Loaded ${rows[0].n.toLocaleString()} unique companies (skipped ${skipped.toLocaleString()} with no postcode).`);
   } finally {
     client.release();
     await pool.end();
