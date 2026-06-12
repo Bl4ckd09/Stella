@@ -1,0 +1,8 @@
+# Runtime reads from Supabase — none of this is needed in the deployment.
+data/
+test/
+scripts/
+supabase/
+elevenlabs/
+*.log
+.env.local

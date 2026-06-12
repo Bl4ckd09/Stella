@@ -1,0 +1,36 @@
+{
+  "_comment": "ElevenLabs Conversational AI 'server tool' (webhook). Add this tool to your agent in the dashboard (Agent → Tools → Add tool → Webhook) or via the API. It calls Stella's deterministic engine so the agent never computes figures itself. Replace YOUR-APP.vercel.app and the secret value.",
+  "type": "webhook",
+  "name": "lookup_business",
+  "description": "Look up a UK business by name (and optional postcode) and return the business-rates relief and grants it can claim, with all monetary figures pre-computed. Call this whenever the caller gives a business name. Read the returned spoken_summary back to the caller; never invent numbers.",
+  "api_schema": {
+    "url": "https://YOUR-APP.vercel.app/api/voice-lookup",
+    "method": "POST",
+    "request_headers": {
+      "Content-Type": "application/json",
+      "X-Tool-Secret": "REPLACE_WITH_VOICE_TOOL_SECRET"
+    },
+    "request_body_schema": {
+      "type": "object",
+      "required": ["business_name"],
+      "properties": {
+        "business_name": {
+          "type": "string",
+          "description": "The business name exactly as the caller said it."
+        },
+        "postcode": {
+          "type": "string",
+          "description": "UK postcode of the premises, if the caller provides one (e.g. 'EC1N 7TE'). Optional."
+        }
+      }
+    }
+  },
+  "response_timeout_secs": 20,
+  "_response_fields_the_agent_should_use": {
+    "found": "boolean — whether a match was found",
+    "spoken_summary": "string — read this to the caller",
+    "annual_relief": "number — £/yr (already calculated; do not recompute)",
+    "backdated_relief": "number — £ backdated estimate",
+    "council_phone": "string — the council's business-rates phone"
+  }
+}

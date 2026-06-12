@@ -1,0 +1,11 @@
+node_modules/
+.next/
+.env.local
+.env*.local
+*.tsbuildinfo
+next-env.d.ts
+# Large data: VOA CSV is kept (41MB, source of truth); CH bulk file is not.
+data/BasicCompanyData*.csv
+data/BasicCompanyData*.zip
+data/*.db
+.vercel
