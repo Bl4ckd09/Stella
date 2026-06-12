@@ -47,7 +47,7 @@ const CHUNK_ROWS = Number(process.env.CH_CHUNK_ROWS || 200_000);
 
 async function copyChunk(client: import("pg").PoolClient, lines: string[]): Promise<void> {
   const stream = client.query(
-    copyFrom(`copy companies_staging
+    copyFrom(`copy companies_house
       (company_number, name, postcode, status, date_of_creation, sic1, sic2, address)
       from stdin with (format csv)`),
   );
@@ -69,15 +69,19 @@ async function main() {
     // (Supabase sets a default that otherwise cancels the load mid-stream).
     await client.query("set statement_timeout = 0");
     await client.query("set idle_in_transaction_session_timeout = 0");
-    console.log(`Truncating companies_house; loading in ${CHUNK_ROWS.toLocaleString()}-row chunks …`);
+    console.log("Truncating companies_house; loading London-relevant companies …");
+    await client.query("drop table if exists companies_staging"); // clean any prior run
     await client.query("truncate companies_house");
-    // CH "AsOneFile" contains duplicate company_numbers; stage into an unlogged
-    // table (no PK, minimal WAL) then dedupe into the real table. Mirrors the
-    // SQLite original's INSERT OR REPLACE.
-    await client.query("drop table if exists companies_staging");
-    await client.query(`create unlogged table companies_staging (
-      company_number text, name text, postcode text, status text,
-      date_of_creation text, sic1 text, sic2 text, address text)`);
+
+    // Only load companies whose registered postcode matches a VOA London
+    // property — that's the functional set the engine can join to a property
+    // (a company elsewhere has no London property to match). Keeps the table +
+    // trigram index well within the 8 GB disk cap. Build an in-memory postcode
+    // set + dedupe company_numbers on the fly (CH AsOneFile has duplicates).
+    const voa = await client.query("select distinct postcode_norm from voa_properties where postcode_norm <> ''");
+    const voaPostcodes = new Set<string>(voa.rows.map((r) => r.postcode_norm as string));
+    console.log(`  ${voaPostcodes.size.toLocaleString()} London postcodes to match against`);
+    const seen = new Set<string>();
 
     const parser = createReadStream(CSV).pipe(
       parse({ columns: (header: string[]) => header.map((h) => h.trim()), skip_empty_lines: true, relax_quotes: true }),
@@ -88,17 +92,23 @@ async function main() {
     let chunk: string[] = [];
     for await (const row of parser) {
       const pc = (row[COL.postcode] ?? "").trim().toUpperCase();
-      if (!pc) {
+      if (!pc || !voaPostcodes.has(pc.replace(/\s+/g, ""))) {
         skipped++;
-        continue; // matches original: skip rows with no postcode
+        continue; // skip rows with no postcode or outside the London VOA set
       }
+      const num = (row[COL.number] ?? "").trim();
+      if (seen.has(num)) {
+        skipped++;
+        continue; // dedupe duplicate company_numbers
+      }
+      seen.add(num);
       const addr = [row[COL.addr1], row[COL.addr2], row[COL.town]]
         .map((x: string) => (x ?? "").trim())
         .filter(Boolean)
         .join(", ");
       chunk.push(
         [
-          (row[COL.number] ?? "").trim(),
+          num,
           (row[COL.name] ?? "").trim(),
           pc,
           (row[COL.status] ?? "").trim().toLowerCase(),
@@ -122,19 +132,8 @@ async function main() {
       count += chunk.length;
     }
 
-    const staged = await client.query("select count(*)::int as n from companies_staging");
-    console.log(`Staged ${staged.rows[0].n.toLocaleString()} rows; deduping into companies_house …`);
-    await client.query(`insert into companies_house
-      (company_number, name, postcode, status, date_of_creation, sic1, sic2, address)
-      select distinct on (company_number)
-        company_number, name, postcode, status, date_of_creation, sic1, sic2, address
-      from companies_staging
-      order by company_number
-      on conflict (company_number) do nothing`);
-    await client.query("drop table companies_staging");
-
     const { rows } = await client.query("select count(*)::int as n from companies_house");
-    console.log(`Loaded ${rows[0].n.toLocaleString()} unique companies (skipped ${skipped.toLocaleString()} with no postcode).`);
+    console.log(`Loaded ${rows[0].n.toLocaleString()} London-relevant companies (skipped ${skipped.toLocaleString()} off-postcode/duplicate).`);
   } finally {
     client.release();
     await pool.end();
