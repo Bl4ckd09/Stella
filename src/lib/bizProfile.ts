@@ -170,10 +170,21 @@ export async function bizProfile(input: BizProfileInput): Promise<BizProfileResu
 
   // ── 3. Auto-select property ──────────────────────────────────────────────────
   if (!selectedUarn) {
+    const bySavings = (a: BusinessResult, b: BusinessResult) =>
+      b.totals.total_annual_savings - a.totals.total_annual_savings || a.rateable_value - b.rateable_value;
     const sectorMatches = effectiveSector ? allProps.filter((b) => b.sector === effectiveSector) : [];
-    const pool = sectorMatches.length ? sectorMatches : allProps;
-    pool.sort((a, b) =>
-      b.totals.total_annual_savings - a.totals.total_annual_savings || a.rateable_value - b.rateable_value);
+    let pool = sectorMatches.length ? sectorMatches : allProps;
+    pool.sort(bySavings);
+
+    // If filtering by sector would hide every claimable unit (the matched unit(s)
+    // are all £0, but eligible units exist elsewhere at this postcode), widen to
+    // the whole postcode so the picker surfaces the units that can actually claim
+    // — rather than silently auto-selecting an ineligible one and showing £0.
+    const poolHasSavings = pool.some((b) => b.totals.total_annual_savings > 0);
+    const postcodeHasSavings = allProps.some((b) => b.totals.total_annual_savings > 0);
+    const widened = !poolHasSavings && postcodeHasSavings;
+    if (widened) pool = allProps.slice().sort(bySavings);
+
     const withSavings = pool.filter((b) => b.totals.total_annual_savings > 0);
 
     if (pool.length === 1) {
@@ -181,6 +192,7 @@ export async function bizProfile(input: BizProfileInput): Promise<BizProfileResu
     } else if (withSavings.length === 1) {
       selectedUarn = withSavings[0].uarn;
     } else {
+      const label = widened ? "" : effectiveSector ? `${effectiveSector} ` : "";
       return {
         step: "pick_property",
         properties: pool,
@@ -192,7 +204,7 @@ export async function bizProfile(input: BizProfileInput): Promise<BizProfileResu
         biz_name: bizName,
         postcode,
         sector: effectiveSector,
-        reason: `Found ${pool.length} ${effectiveSector || ""} premises at ${postcode} — which is yours?`,
+        reason: `Found ${pool.length} ${label}premises at ${postcode} — which is yours?`,
       };
     }
   }
