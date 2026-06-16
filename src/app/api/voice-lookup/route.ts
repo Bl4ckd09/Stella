@@ -41,7 +41,7 @@ function spokenSummary(biz: BusinessResult, council: { phone?: string | null; em
     `If it has been unclaimed since April 2023, the backdated amount could be around ${gbp(back)}. ` +
     `This relief is not applied automatically — you have to claim it from your council. `;
   if (council?.phone) summary += `Your council's business rates team is on ${council.phone}. `;
-  summary += `Would you like me to email you a ready-to-send claim letter?`;
+  summary += `Would you like me to text you a ready-to-send claim letter?`;
   return summary;
 }
 

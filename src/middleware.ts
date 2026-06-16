@@ -25,7 +25,10 @@ function forbidden(reason: string) {
 
 export function middleware(req: NextRequest) {
   const path = req.nextUrl.pathname;
-  const isVoice = path.startsWith("/api/voice-lookup");
+  // Both voice webhooks (/api/voice-lookup, /api/voice-letter) are server-to-
+  // server calls from ElevenLabs, gated by their own X-Tool-Secret header and
+  // carrying no Origin — exempt them from the same-origin check.
+  const isVoice = path.startsWith("/api/voice-");
   const ip = clientIp(req);
 
   // 1) Rate limit per IP.
