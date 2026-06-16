@@ -221,13 +221,15 @@ export default function Home() {
                       className="primary"
                       onClick={() => {
                         const subject = `Small Business Rate Relief claim — UARN ${p?.uarn ?? ""}`;
-                        window.location.href =
-                          `mailto:${analysis.council?.email ?? ""}` +
-                          `?subject=${encodeURIComponent(subject)}` +
+                        const url =
+                          `https://mail.google.com/mail/?view=cm&fs=1` +
+                          `&to=${encodeURIComponent(analysis.council?.email ?? "")}` +
+                          `&su=${encodeURIComponent(subject)}` +
                           `&body=${encodeURIComponent(letter)}`;
+                        window.open(url, "_blank", "noopener,noreferrer");
                       }}
                     >
-                      Send via email
+                      Send via Gmail
                     </button>
                     <button
                       className="ghost"
@@ -247,7 +249,7 @@ export default function Home() {
                 )}
                 {analysis.council?.email && (
                   <div className="sub" style={{ marginTop: 8 }}>
-                    Opens your email app addressed to {analysis.council.email}. Review, add your name, and send — it goes from your own address.
+                    Opens a Gmail compose window addressed to {analysis.council.email}. Review, add your name, and send — it goes from your own Gmail.
                   </div>
                 )}
               </>
