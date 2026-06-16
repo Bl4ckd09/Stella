@@ -59,6 +59,7 @@ export default function Home() {
   const [picker, setPicker] = useState<PickProperty | null>(null);
   const [letter, setLetter] = useState<string>("");
   const [letterLoading, setLetterLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   async function lookup(uarn?: string) {
     setLoading(true);
@@ -211,7 +212,46 @@ export default function Home() {
                 {letterLoading ? "Writing…" : "Generate claim letter"}
               </button>
             </div>
-            {letter && <pre className="letter" style={{ marginTop: 14 }}>{letter}</pre>}
+            {letter && (
+              <>
+                <pre className="letter" style={{ marginTop: 14 }}>{letter}</pre>
+                {!letterLoading && (
+                  <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button
+                      className="primary"
+                      onClick={() => {
+                        const subject = `Small Business Rate Relief claim — UARN ${p?.uarn ?? ""}`;
+                        window.location.href =
+                          `mailto:${analysis.council?.email ?? ""}` +
+                          `?subject=${encodeURIComponent(subject)}` +
+                          `&body=${encodeURIComponent(letter)}`;
+                      }}
+                    >
+                      Send via email
+                    </button>
+                    <button
+                      className="ghost"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(letter);
+                          setCopied(true);
+                          setTimeout(() => setCopied(false), 2000);
+                        } catch {
+                          /* clipboard unavailable */
+                        }
+                      }}
+                    >
+                      {copied ? "Copied ✓" : "Copy"}
+                    </button>
+                  </div>
+                )}
+                {analysis.council?.email && (
+                  <div className="sub" style={{ marginTop: 8 }}>
+                    Opens your email app addressed to {analysis.council.email}. Review, add your name, and send — it goes from your own address.
+                  </div>
+                )}
+              </>
+            )}
           </div>
 
           {analysis.grants.length > 0 && (
