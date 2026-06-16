@@ -6,6 +6,7 @@
  */
 import { NextRequest } from "next/server";
 import { streamChatResponse } from "@/lib/llm";
+import { clampStr, clampArr } from "@/lib/sanitize";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -15,27 +16,28 @@ export async function POST(req: NextRequest) {
   const grant = data.grant ?? {};
   const biz = data.business ?? {};
 
-  const reasons: string[] = grant.match_reasons ?? [];
-  const blockers: string[] = grant.blockers ?? [];
-  const sicStr = (biz.sic_codes ?? []).slice(0, 2).join(", ") || "not specified";
-  const age = biz.company_age_years;
+  // Bound untrusted input to keep prompt (and token cost) in check.
+  const reasons = clampArr<string>(grant.match_reasons, 12).map((r) => clampStr(r, 200));
+  const blockers = clampArr<string>(grant.blockers, 8).map((b) => clampStr(b, 200));
+  const sicStr = clampArr<string>(biz.sic_codes, 2).map((s) => clampStr(s, 80)).join(", ") || "not specified";
+  const age = Number(biz.company_age_years);
   const ageStr = age ? `${Math.round(age)} years old` : "age unknown";
   const rv = Number(biz.rateable_value ?? 0);
 
-  const prompt = `You are helping ${biz.name ?? "this business"} apply for ${grant.name}.
+  const prompt = `You are helping ${clampStr(biz.name, 120) || "this business"} apply for ${clampStr(grant.name, 120)}.
 
 BUSINESS PROFILE:
-- Name: ${biz.name ?? "Unknown"}
-- Sector: ${biz.sector ?? ""} | Borough: ${biz.borough ?? ""}
+- Name: ${clampStr(biz.name, 120) || "Unknown"}
+- Sector: ${clampStr(biz.sector, 40)} | Borough: ${clampStr(biz.borough, 80)}
 - Company age: ${ageStr} | Rateable value: £${Math.round(rv).toLocaleString("en-GB")}
 - SIC codes: ${sicStr}
 
 GRANT:
-- Name: ${grant.name}
-- Funder: ${grant.funder}
-- Value: ${grant.value}
-- Apply at: ${grant.url}
-- Deadline: ${grant.deadline}
+- Name: ${clampStr(grant.name, 120)}
+- Funder: ${clampStr(grant.funder, 120)}
+- Value: ${clampStr(grant.value, 120)}
+- Apply at: ${clampStr(grant.url, 200)}
+- Deadline: ${clampStr(grant.deadline, 80)}
 
 WHY THIS BUSINESS IS ELIGIBLE:
 ${reasons.map((r) => `- ${r}`).join("\n")}
