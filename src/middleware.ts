@@ -57,8 +57,11 @@ export function middleware(req: NextRequest) {
   // carrying no Origin — exempt them from the same-origin check.
   const isVoice = path.startsWith("/api/voice-");
   const isAgents = path.startsWith("/api/agents");
+  // The cron worker is machine-to-machine — it guards itself with CRON_SECRET,
+  // so it's exempt from the operator (Basic-auth) gate.
+  const isCron = path === "/api/agents/cron";
   const isHq = path === "/hq" || path.startsWith("/hq/");
-  const isPrivate = isAgents || isHq;
+  const isPrivate = isHq || (isAgents && !isCron);
   const ip = clientIp(req);
 
   // 1) Rate limit per IP.

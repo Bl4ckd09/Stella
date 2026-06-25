@@ -73,6 +73,7 @@ export default function HQ() {
   const [err, setErr] = useState<string | null>(null);
   const [llm, setLlm] = useState<LlmStatus | null>(null);
   const [view, setView] = useState<"live" | "history">("live");
+  const [worker, setWorker] = useState<{ enabled: boolean; useLLM: boolean; tick: number; runId: string | null } | null>(null);
 
   const stateRef = useRef<BusinessState | null>(null);
   stateRef.current = state;
@@ -97,7 +98,19 @@ export default function HQ() {
     runIdRef.current = crypto.randomUUID();
     labelRef.current = `Run ${new Date().toLocaleString()}`;
     boot("assisted");
+    fetch("/api/agents/worker").then((r) => r.json()).then((d) => setWorker(d.status)).catch(() => {});
   }, [boot]);
+
+  const toggleWorker = useCallback(async () => {
+    const cur = worker;
+    const res = await fetch("/api/agents/worker", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: !(cur?.enabled ?? false) }),
+    });
+    const d = await res.json();
+    setWorker(d.status);
+  }, [worker]);
 
   const tickOnce = useCallback(async () => {
     const cur = stateRef.current;
@@ -264,6 +277,15 @@ export default function HQ() {
           <input type="range" min={300} max={2600} step={100} value={2900 - speed} onChange={(e) => setSpeed(2900 - Number(e.target.value))} />
         </label>
 
+        {worker && (
+          <button
+            className={`hq-worker ${worker.enabled ? "on" : ""}`}
+            onClick={toggleWorker}
+            title="Server-side 24/7 worker (Vercel Cron). Keeps the business running even when this page is closed; view its runs under History."
+          >
+            🌙 24/7 worker: {worker.enabled ? "ON" : "off"}
+          </button>
+        )}
         <button className={`hq-kill ${state.running ? "" : "tripped"}`} onClick={toggleKill}>
           {state.running ? "● live" : "■ stopped"}
         </button>
