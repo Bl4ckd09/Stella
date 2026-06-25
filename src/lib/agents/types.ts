@@ -50,6 +50,7 @@ export type Stage =
   | "scanning" //           Analyst running the deterministic engine
   | "qualified" //          worth pursuing
   | "disqualified" //       no claimable relief — dropped (ethically)
+  | "needs_optin" //        eligible but NO consent on file — cannot be contacted
   | "contacted" //          Closer sent the free-scan + offer
   | "won_claim_pack" //     customer bought the £49 DIY claim pack
   | "won_admin" //          customer bought the £199 admin support
@@ -95,8 +96,16 @@ export interface Deal {
   /** Headline relief findings from the engine (drives prose + UI). */
   findings: ReliefFinding[];
   confidence: "high" | "medium" | "low" | "none";
-  /** Channel the Closer reaches the customer on. */
-  channel: "email" | "whatsapp";
+  /** Channel the Closer reaches the owner on. */
+  channel: OutboundChannel;
+  /**
+   * Whether the owner has consented to / requested contact. Outbound (calls,
+   * messages) is ONLY allowed when true — the PRD bans cold outreach. Sourcing a
+   * premise from public VOA data is fine; contacting its owner is not, without this.
+   */
+  consent: boolean;
+  /** How consent was captured (e.g. "web scan opt-in", "phone callback request"). */
+  consentSource: string;
   authorized: boolean;
   artifacts: Artifact[];
   /** Human-readable trail of what happened to this deal. */
@@ -109,6 +118,8 @@ export interface Deal {
 
 // ── Seeded prospect (carries real RV/sector so the engine computes real £) ──
 
+export type OutboundChannel = "voice" | "whatsapp" | "email";
+
 export interface ProspectBusiness {
   name: string;
   postcode: string;
@@ -119,6 +130,13 @@ export interface ProspectBusiness {
   address: string;
   /** Decision-maker name the agents address (simulated). */
   contact: string;
+  /** Phone for the voice channel (simulated demo numbers). */
+  phone?: string;
+  /** Preferred outbound channel for this owner. */
+  channel: OutboundChannel;
+  /** Whether the owner opted in to contact, and how (drives the consent gate). */
+  consent: boolean;
+  consentSource: string;
 }
 
 // ── Safety & oversight ──────────────────────────────────────────────────────
@@ -165,6 +183,7 @@ export type ActionType =
   | "scan"
   | "qualify"
   | "disqualify"
+  | "hold_no_consent"
   | "outreach"
   | "convert"
   | "lose"
@@ -190,6 +209,10 @@ export interface AgentEvent {
   /** Money snapshot at the moment of the event (display only). */
   money?: Partial<Money>;
   blocked?: boolean;
+  /** Groups events emitted together by a parallel outbound dispatch. */
+  batch?: string;
+  /** Outbound channel, when the event is a contact attempt. */
+  channel?: OutboundChannel;
 }
 
 // ── Top-level business state ────────────────────────────────────────────────

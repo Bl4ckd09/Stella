@@ -62,8 +62,18 @@ roster, and the human approval queue.
   prepares paid work, drafts council letters, submits, and records outcomes on
   its own — sourcing 12 prospects to terminal outcomes, booking revenue and
   delivering client value, fully unattended.
+- **Agents initiate, in parallel.** Outreach is a batch operation: qualified
+  owners accumulate, then a single **outbound campaign** contacts them all at
+  once (voice / WhatsApp / email) concurrently — wall-clock ≈ the slowest single
+  contact, not the sum (a 5-contact batch completes in ~0.9s, not ~3s).
 - An **autonomy dial** (`supervised → assisted → autopilot`) sets exactly how much
   is handed off.
+
+### 💸 Cost-aware (two LLM tiers)
+- The LLM layer has two tiers: a **fast/cheap** tier for the high-volume agent
+  reasoning, and a **quality** tier for the customer/council documents. Mix
+  providers freely — e.g. a small **Modal**-hosted open model for the loop and
+  **Claude** for the letters — via env, no code change. Both default to Claude.
 
 ### 🎛️ UX clarity
 - One screen: live KPIs, the agent org with live working/idle/blocked status, a
@@ -89,10 +99,14 @@ The business is autonomous but **structurally constrained**:
 3. **Authorization gate (hard)** — a council letter cannot be drafted or submitted
    without a signed Letter of Authority on file. Tested: **0 breaches** across a
    full run.
-4. **Human approval queue** — actions above the autonomy threshold (e.g.
+4. **Consent gate on outbound** — the workforce only calls/messages owners who
+   opted in. Eligible-but-non-consented owners are surfaced and **held**
+   (`needs_optin`), never cold-contacted — the PRD bans cold outreach. Outbound
+   is sandbox-simulated unless `STELLA_LIVE_OUTBOUND=true`.
+5. **Human approval queue** — actions above the autonomy threshold (e.g.
    submitting to a council on a customer's behalf) pause and wait for a human.
-5. **Kill switch** — flip `running` off and the loop refuses to act.
-6. **Full audit trail** — every decision is an event with the agent, action, risk,
+6. **Kill switch** — flip `running` off and the loop refuses to act.
+7. **Full audit trail** — every decision is an event with the agent, action, risk,
    reasoning, and money snapshot.
 
 ---
@@ -115,14 +129,17 @@ npm test               # 1,475 tests incl. the agent runtime
 
 ```
 src/lib/agents/
-  types.ts          state, deal, agent, event types
+  types.ts          state, deal, agent, event types (+ consent, channels)
   roster.ts         the 7 agents + their system prompts
   prospects.ts      seeded London businesses (fed to the real engine)
   compliance.ts     the safety guard (banned copy, disclosures, money trace)
-  reasoning.ts      LLM prose + deterministic fallbacks
-  orchestrator.ts   the autonomous tick loop + approvals + simulation
+  reasoning.ts      LLM prose + deterministic fallbacks (fast/quality tiers)
+  integrations.ts   outbound adapters (voice/WhatsApp/email; sandbox-safe)
+  orchestrator.ts   the autonomous tick loop + parallel dispatcher + approvals
+src/lib/llm.ts               two-tier provider seam (Anthropic | OpenAI/Modal)
 src/app/api/agents/tick      advance the loop (stateless)
+src/app/api/agents/dispatch  parallel outbound campaign (consent-gated)
 src/app/api/agents/approve   human approval decisions
 src/app/hq/page.tsx          the Mission Control console
-test/agents.*.test.ts        compliance + orchestrator tests
+test/agents.*.test.ts        compliance + orchestrator + dispatch tests
 ```

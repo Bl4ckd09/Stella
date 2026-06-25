@@ -20,9 +20,14 @@ function deal(over: Partial<Deal> = {}): Deal {
       uarn: "DEMO-0001",
       address: "42 Mare Street, London",
       contact: "Priya Sharma",
+      channel: "email",
+      consent: true,
+      consentSource: "web scan opt-in",
     },
     stage: "qualified",
     product: null,
+    consent: true,
+    consentSource: "web scan opt-in",
     money: { estAnnualSaving: 4393, estBackdated: 13179, confirmedBackdated: null },
     findings: [
       {

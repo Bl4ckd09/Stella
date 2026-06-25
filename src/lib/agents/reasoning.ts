@@ -15,7 +15,7 @@ import { AGENTS } from "./roster";
 import { gbp } from "./format";
 import { councilApplyUrl } from "./prospects";
 import type { ActionType, AgentId, Deal } from "./types";
-import { agentModel, completeWith, llmAvailable } from "../llm";
+import { reason, artifact, reasonAvailable, artifactAvailable } from "../llm";
 
 interface ReasonOpts {
   useLLM: boolean;
@@ -49,10 +49,21 @@ function facts(deal: Deal): string {
   return lines.join("\n");
 }
 
-async function llm(agent: AgentId, prompt: string, maxTokens: number): Promise<string | null> {
-  if (!llmAvailable()) return null;
+/** Short reasoning lines run on the FAST/cheap tier (e.g. a small Modal model). */
+async function reasonLine(agent: AgentId, prompt: string, maxTokens: number): Promise<string | null> {
+  if (!reasonAvailable()) return null;
   try {
-    return await completeWith(prompt, { system: AGENTS[agent].system, model: agentModel(), maxTokens });
+    return await reason(prompt, { system: AGENTS[agent].system, maxTokens });
+  } catch {
+    return null;
+  }
+}
+
+/** Customer/council artifacts run on the QUALITY tier (e.g. Claude). */
+async function artifactText(agent: AgentId, prompt: string, maxTokens: number): Promise<string | null> {
+  if (!artifactAvailable()) return null;
+  try {
+    return await artifact(prompt, { system: AGENTS[agent].system, maxTokens });
   } catch {
     return null;
   }
@@ -65,6 +76,7 @@ const TEMPLATE_REASON: Record<ActionType, (d: Deal) => string> = {
   scan: (d) => `Ran the deterministic relief engine on ${d.business.name}; figures come straight from the engine.`,
   qualify: (d) => `${d.business.name} shows ${gbp(d.money.estAnnualSaving)}/yr potential at ${d.confidence} confidence — worth pursuing.`,
   disqualify: (d) => `${d.business.name} has no claimable annual relief; dropping it rather than inventing an opportunity.`,
+  hold_no_consent: (d) => `${d.business.name} is eligible but has no consent on file — cannot contact without an opt-in.`,
   outreach: (d) => `Reaching out to ${d.business.contact} at ${d.business.name} with the free-scan summary and options.`,
   convert: (d) => `${d.business.name} chose a paid option after seeing the free route — booking it.`,
   lose: (d) => `${d.business.name} declined or chose the free council route; closing politely.`,
@@ -90,7 +102,7 @@ export async function agentReasoning(
   const preScan = action === "source" || action === "scan";
   const context = preScan ? factsProfile(deal) : facts(deal);
   const prompt = `Decision: ${action} for this deal.\n\n${context}\n\nIn ONE sentence, explain your reasoning for this action.${preScan ? "" : " Use exact figures only."}`;
-  const out = await llm(agent, prompt, 160);
+  const out = await reasonLine(agent, prompt, 160);
   return out ?? fallback;
 }
 
@@ -111,7 +123,7 @@ export async function composeOutreach(deal: Deal, opts: ReasonOpts): Promise<str
   ].join("\n");
   if (!opts.useLLM) return fallback;
   const prompt = `Write the first outreach message.\n\n${facts(deal)}\n\nLead with the free council route, then offer the £49 claim pack and £199 admin support. Use the exact figures. End by asking if they want the free summary.`;
-  const out = await llm("closer", prompt, 350);
+  const out = await artifactText("closer", prompt, 350);
   return out ?? fallback;
 }
 
@@ -139,7 +151,7 @@ export async function composeClaimPack(deal: Deal, opts: ReasonOpts): Promise<st
   ].join("\n");
   if (!opts.useLLM) return fallback;
   const prompt = `Write a concise claim-pack document (markdown).\n\n${facts(deal)}\nCouncil apply URL: ${councilApplyUrl(b.borough)}\n\nInclude: property summary, the relief findings with exact figures, how to apply free with the council, and the required estimate + no-guarantee disclaimers.`;
-  const out = await llm("caseworker", prompt, 800);
+  const out = await artifactText("caseworker", prompt, 800);
   return out ?? fallback;
 }
 
@@ -164,6 +176,6 @@ export async function composeCouncilLetter(deal: Deal, opts: ReasonOpts): Promis
   ].join("\n");
   if (!opts.useLLM) return fallback;
   const prompt = `Write a formal letter to the council's business-rates team requesting Small Business Rate Relief on the customer's behalf (we hold signed authorisation).\n\n${facts(deal)}\n\nReference the property and UARN, list the relief sought with exact figures, acknowledge the council decides, and ask what evidence is needed. Do not guarantee any outcome.`;
-  const out = await llm("caseworker", prompt, 600);
+  const out = await artifactText("caseworker", prompt, 600);
   return out ?? fallback;
 }

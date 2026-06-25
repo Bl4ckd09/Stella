@@ -1,95 +1,190 @@
-# Stella — Unclaimed Business Money Engine (cloud rebuild)
+# Stella — a self-running business operated by AI agents
 
-> 🤖 **Hands-Off HQ (`/hq`)** — the `autonomous-agents` branch turns Stella into a
-> *self-running business operated entirely by an AI workforce* for the Cursor
-> "Hands Off" hackathon. Press **Go hands-off** and watch seven agents source,
-> qualify, sell, and file claims live — with a compliance guard, a hard
-> authorization gate, and a human approval queue. See **[HACKATHON.md](./HACKATHON.md)**.
+Stella finds unclaimed UK **Small Business Rate Relief** for London SMBs. This
+branch turns that product into a **self-running business**: a workforce of seven
+AI agents sources prospects, scans them, qualifies, sells, prepares the paid
+work, files council applications, and books revenue — while a human only
+supervises a Mission Control console (and holds a kill switch).
 
-Helps London small businesses find unclaimed **Small Business Rate Relief** and
-grants. Two channels share one deterministic engine:
+Built for the Cursor **"Hands Off"** hackathon. Open **`/hq`**, press
+**▶ Go hands-off**, and walk away.
 
-- **Web**: owner types their business name (+ postcode) → relief + grants + a
-  ready-to-send claim letter.
-- **Phone**: owner calls an ElevenLabs voice agent and says their business name →
-  the agent reads back exactly what they can claim.
+> **Sacred rule:** every £ figure is computed by the deterministic relief engine
+> (1,441 parity tests). Agents reason and write prose — they never invent, alter,
+> or recalculate money, and a compliance guard blocks any £ that doesn't trace to
+> the engine. See [HACKATHON.md](./HACKATHON.md) for the judging-criteria map.
 
-> **Design rule (inherited, sacred):** every £ figure comes from the
-> deterministic engine. The LLM only writes prose / narrates. Enforced in code
-> and by 1,457 parity tests against the original Python engine.
+---
 
-## Stack
+## The workforce
 
-| Concern | Original (DGX Spark) | This rebuild |
+| Agent | Role | Owns |
 |---|---|---|
-| UI | Flask + vanilla JS | Next.js 15 (App Router) on **Vercel**; v0 for design iteration |
-| Engine | Python (`engines/`) | **TypeScript** (`src/lib/engines/`) — parity-tested port |
-| Data | SQLite + CSV | **Supabase Postgres** (`pg_trgm` fuzzy name search) |
-| LLM (prose) | Nemotron / Ollama | **Claude API** (Anthropic SDK, `claude-opus-4-8`) |
-| Phone | — | **ElevenLabs** Conversational AI + **Twilio** |
+| 🧭 **Ada** | Chief of Staff | Decides the next action each cycle |
+| 🔭 **Mara** | Acquisition | Sources SBRR-eligible prospects (public VOA data) |
+| 📊 **Devi** | Eligibility Analyst | Runs the deterministic engine; qualifies / disqualifies |
+| ✉️ **Theo** | Outreach & Sales | Writes compliant offers; converts customers |
+| 📁 **Iris** | Case Operations | Claim packs, council letters, advancing cases |
+| 🛡️ **Quinn** | Compliance & Oversight | Reviews **every** outbound artifact; can block |
+| 💷 **Otto** | Finance | Books revenue; records confirmed client recoveries |
 
-## What works right now
+## How it works
 
-- ✅ Relief + grants engines ported to TS, **1457/1457 parity tests pass** (`npm test`).
-- ✅ Postgres schema + bulk loaders (VOA via `COPY`; CH streaming `COPY`).
-- ✅ API routes: `/api/lookup`, `/api/biz-profile`, `/api/letter` (SSE),
-  `/api/grant-application` (SSE), `/api/grants`, `/api/voice-lookup` (phone tool).
-- ✅ Web UI (business name + postcode → analysis + grants + streamed claim letter).
-- ✅ ElevenLabs agent prompt + server-tool definition + Twilio provisioning scripts.
-- ✅ Verified end-to-end locally against the real 311k-row VOA dataset.
-- ⏳ Needs live credentials to go to production (see below). LLM prose path is
-  wired but blank-keys gracefully.
+The whole runtime is a **pure, replayable reducer**: `tick(state) → {state, events}`.
+One tick = one world-step — either the world responds (a customer replies, a
+Letter of Authority is signed, a council decides) or one agent takes one action.
 
-## Local development
+- **State lives in the console; the server is stateless.** Each tick the console
+  POSTs the current state to `/api/agents/tick`, the server runs one step
+  (engine + compliance + LLM reasoning) and returns the next state. No database
+  is needed for the demo, and the whole run is replayable.
+- **Real money, fake-proof.** Seeded London businesses are fed through the same
+  `engines/relief.ts` the live product uses, so every £ is computed law, not a
+  guess. The LLM only writes prose, with a deterministic template fallback for
+  every call — so the loop runs even with no API key.
+- **The pipeline.** `sourced → scanning → qualified → (campaign) → contacted →
+  won → case work → submitted → outcome → closed`, with `disqualified` /
+  `needs_optin` side-exits.
+
+### Agents initiate outreach — in parallel
+
+Outreach is a **batch operation**. Qualified owners accumulate, then a single
+**outbound campaign** contacts them all at once across **voice (ElevenLabs) /
+WhatsApp (Wassist) / email (Resend)** concurrently — wall-clock ≈ the slowest
+single contact, not the sum (a 5-contact batch finishes in ~0.9s, not ~3s).
+Sends are **sandbox-simulated** unless `STELLA_LIVE_OUTBOUND=true`. Run it
+automatically (hands-off) or on demand with the **📣 Outbound campaign** button.
+
+### Safety & oversight (structural, not advisory)
+
+1. **Money trace** — a pure guard re-derives the allowed figures and blocks any
+   £ in agent output that doesn't trace to the engine.
+2. **Compliance gate** — every artifact is scanned for banned claims ("owed",
+   "guaranteed", "no win no fee", implied endorsement) and required disclosures
+   (free council route, "estimate must be confirmed"); failures are rewritten
+   with a safe template and re-checked.
+3. **Consent gate** — only owners who opted in are contacted; eligible-but-
+   non-consented owners are **held** (`needs_optin`), never cold-contacted.
+4. **Authorization gate (hard)** — no council letter is drafted or submitted
+   without a signed Letter of Authority.
+5. **Human approval queue** — actions above the autonomy threshold (e.g.
+   submitting to a council) pause for a human.
+6. **Autonomy dial** (`supervised → assisted → autopilot`) + **kill switch** +
+   a full **audit trail** of every decision.
+
+### Cost-aware: two LLM tiers
+
+The LLM layer (`src/lib/llm.ts`) has two tiers so you can spend cleverly:
+
+- **Fast** tier — high-volume agent reasoning (the activity-feed lines).
+- **Quality** tier — customer/council documents (claim packs, council letters).
+
+Each tier is independently set to **Claude** or **any OpenAI-compatible endpoint**
+(e.g. a **Modal** Managed Inference Endpoint, which serves the OpenAI API under
+`/v1`) — no code change. Defaults to Claude for both. Example hybrid (Modal for
+the loop, Claude for the letters):
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-...            # quality tier (letters)
+STELLA_AGENT_PROVIDER=openai            # fast tier → Modal
+LLM_BASE_URL=https://<endpoint>/v1
+LLM_MODEL=Qwen/Qwen3.6-35B-A3B
+MODAL_KEY=wk-...   MODAL_SECRET=ws-...   # or deploy with --unauthenticated
+```
+
+See [`.env.local.example`](./.env.local.example) for all options.
+
+## Quick start
 
 ```bash
 npm install
-cp .env.local.example .env.local      # fill DATABASE_URL at minimum
-
-# Local Postgres (or point DATABASE_URL at Supabase):
-createdb stella_dev
-psql stella_dev -f supabase/migrations/0001_init.sql
-npm run db:borough                     # 33 London councils
-npm run load:voa                       # 311k VOA properties (data/voa_london_index.csv)
-# Companies House (5.6M) — download + unzip first (see below), then:
-# npm run load:companies path/to/BasicCompanyDataAsOneFile-YYYY-MM-DD.csv
-
-npm test                               # parity tests
-npm run dev                            # http://localhost:3000
+npm run dev                 # open http://localhost:3000/hq → press "Go hands-off"
+npm test                    # 1,477 tests (engine parity + agent runtime)
 ```
 
-## Production setup (credentials & plan levels)
+- **No keys needed** for the core demo — the workforce runs on the deterministic
+  engine + templated reasoning.
+- Set `ANTHROPIC_API_KEY` (or a Modal/OpenAI endpoint) and toggle **AI reasoning**
+  in `/hq` for live LLM-written reasoning and artifacts.
 
-Fill `.env.local` (and the same vars in Vercel → Project → Settings → Env):
+### Agent API
 
-1. **Supabase** (Pro, ~$25/mo — 8 GB; Free 500 MB can't hold 5.6M CH rows).
-   Create project → run `supabase/migrations/0001_init.sql` (SQL editor or
-   `psql "$DATABASE_URL" -f`). Copy URL, anon key, service-role key, and the
-   `DATABASE_URL` (Settings → Database → Connection string → URI).
-2. **Data load**: `npm run db:borough && npm run load:voa && npm run load:companies …`
-   pointed at `DATABASE_URL`. CH bulk file is free from
-   <http://download.companieshouse.gov.uk/en_output.html> (BasicCompanyDataAsOneFile).
-3. **Claude API** (<https://platform.claude.com/settings/keys>). Set
-   `ANTHROPIC_API_KEY` (optionally `ANTHROPIC_MODEL`, default `claude-opus-4-8`;
-   `claude-haiku-4-5` is cheaper at volume). Pay-as-you-go.
-4. **Vercel** (Pro $20/mo for commercial use). Import the repo, add env vars,
-   deploy. SSE routes have `maxDuration` set.
-5. **ElevenLabs** (paid plan for phone + concurrency; Creator ~$22/mo to start).
-   `ELEVENLABS_API_KEY`. Create the agent:
-   `cd elevenlabs && ELEVENLABS_API_KEY=… APP_URL=https://your.vercel.app VOICE_TOOL_SECRET=… ./create-agent.sh`
-6. **Twilio** (PAYG, ~£1/mo number + per-minute). With `AGENT_ID` from step 5:
-   `ELEVENLABS_API_KEY=… AGENT_ID=… TWILIO_ACCOUNT_SID=… TWILIO_AUTH_TOKEN=… ./provision-twilio.sh`
-7. Set `VOICE_TOOL_SECRET` to a long random string in **both** Vercel env and the
-   ElevenLabs tool header — it authenticates the agent's webhook calls.
+| Route | Purpose |
+|---|---|
+| `POST /api/agents/tick` | Advance the loop one step (stateless); returns next state + events |
+| `POST /api/agents/dispatch` | Run a parallel outbound campaign (consent-gated) |
+| `POST /api/agents/approve` | Apply a human approval decision |
+
+---
+
+## The underlying product
+
+The agents are an orchestration layer on top of Stella's existing primitives —
+the same engine and channels power a live web + phone product:
+
+- **Web** (`/`): owner types business name (+ postcode) → relief + grants + a
+  streamed, ready-to-send claim letter.
+- **Phone**: owner calls an ElevenLabs voice agent and says their business name →
+  the agent reads back exactly what they can claim (figures from the engine).
+
+### Stack
+
+| Concern | Implementation |
+|---|---|
+| UI | Next.js 15 (App Router) on **Vercel** |
+| Engine | **TypeScript** (`src/lib/engines/`) — parity-tested port of the Python original |
+| Data | **Supabase Postgres** (`pg_trgm` fuzzy name search; 311k VOA + 5.6M Companies House rows) |
+| LLM (prose) | **Claude** by default; any OpenAI-compatible endpoint (Modal/Nebius/…) via the tier seam |
+| Phone | **ElevenLabs** Conversational AI + **Twilio** |
+
+### Local development (full product, with data)
+
+```bash
+cp .env.local.example .env.local       # fill DATABASE_URL at minimum
+createdb stella_dev
+psql stella_dev -f supabase/migrations/0001_init.sql
+npm run db:borough                      # 33 London councils
+npm run load:voa                        # 311k VOA properties (data/voa_london_index.csv)
+# Companies House (5.6M) — download + unzip, then:
+# npm run load:companies path/to/BasicCompanyDataAsOneFile-YYYY-MM-DD.csv
+npm run dev
+```
+
+> The `/hq` autonomous demo does **not** need the database — only the full
+> web/phone lookup product does.
+
+### Production setup (web/phone product)
+
+Fill `.env.local` (and the same vars in Vercel → Settings → Env):
+
+1. **Supabase** (Pro tier — Free 500 MB can't hold 5.6M CH rows). Run
+   `supabase/migrations/0001_init.sql`; copy URL, anon key, service-role key, and
+   `DATABASE_URL`.
+2. **Data load**: `npm run db:borough && npm run load:voa && npm run load:companies …`.
+   CH bulk file: <http://download.companieshouse.gov.uk/en_output.html>.
+3. **LLM**: `ANTHROPIC_API_KEY` (default Claude), or set the OpenAI/Modal tier
+   vars above.
+4. **Vercel**: import the repo, add env vars, deploy. SSE + agent routes have
+   `maxDuration` set.
+5. **ElevenLabs / Twilio** (voice): `cd elevenlabs && … ./create-agent.sh` then
+   `./provision-twilio.sh`. Set `VOICE_TOOL_SECRET` in both Vercel and the
+   ElevenLabs tool header.
+6. **Outbound (optional, live)**: `STELLA_LIVE_OUTBOUND=true` + the channel creds
+   (ElevenLabs phone-number id, Wassist, Resend). Sandbox-simulated otherwise.
 
 ## Project layout
 
 ```
-src/lib/engines/   relief.ts, grants.ts      (deterministic — parity-tested)
-src/lib/           db.ts, lookup.ts, bizProfile.ts, sectors.ts, llm.ts
-src/app/api/       lookup, biz-profile, letter, grant-application, grants, voice-lookup
-supabase/migrations/0001_init.sql
-scripts/           load-voa.ts, load-companies.ts, load-boroughs.ts
-elevenlabs/        agent-prompt.md, tool definition, create-agent.sh, provision-twilio.sh
-test/              relief.parity.test.ts, grants.parity.test.ts, fixtures/
+src/lib/agents/      types, roster, prospects, compliance, reasoning,
+                     integrations (outbound), orchestrator (loop + dispatcher)
+src/lib/llm.ts       two-tier provider seam (Anthropic | OpenAI/Modal)
+src/lib/engines/     relief.ts, grants.ts        (deterministic — parity-tested)
+src/lib/             db.ts, lookup.ts, bizProfile.ts, sectors.ts
+src/app/hq/          the Mission Control console
+src/app/api/agents/  tick, dispatch, approve
+src/app/api/         lookup, biz-profile, letter, grant-application, grants, voice-lookup
+supabase/migrations/ 0001_init.sql, 0002_rls.sql
+scripts/             load-voa.ts, load-companies.ts, load-boroughs.ts
+elevenlabs/          agent-prompt.md, tool definition, create-agent.sh, provision-twilio.sh
+test/                agents.* (runtime), relief/grants parity, fixtures/
 ```

@@ -12,6 +12,7 @@
  */
 import { NextResponse } from "next/server";
 import { initState, tick, hasWork } from "@/lib/agents/orchestrator";
+import { llmStatus } from "@/lib/llm";
 import type { AgentEvent, AutonomyLevel, BusinessState } from "@/lib/agents/types";
 
 export const runtime = "nodejs";
@@ -30,10 +31,10 @@ export async function POST(req: Request) {
     body = {};
   }
 
-  // No state yet → hand back a fresh company.
+  // No state yet → hand back a fresh company (+ the LLM tier config).
   if (!body.state) {
     const state = initState(body.autonomy ?? "assisted");
-    return NextResponse.json({ state, events: [], hasWork: hasWork(state) });
+    return NextResponse.json({ state, events: [], hasWork: hasWork(state), llm: llmStatus() });
   }
 
   const steps = Math.min(Math.max(1, body.steps ?? 1), 10);

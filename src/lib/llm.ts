@@ -1,24 +1,26 @@
 /**
- * LLM client — provider-agnostic.
+ * LLM client — provider-agnostic, with two cost/quality TIERS.
  *
  * LLM BOUNDARY: this writes prose only (claim letters, grant applications,
- * agent reasoning). It never receives authority to compute £ figures — those
- * are passed in as facts from the deterministic engine and must be echoed
- * verbatim.
+ * agent reasoning). It never computes £ figures — those are passed in as facts
+ * from the deterministic engine and must be echoed verbatim.
  *
- * Two backends, selected by `LLM_PROVIDER`:
- *   - "anthropic" (default) — Claude via the Anthropic SDK.
- *   - "openai"              — ANY OpenAI-compatible /chat/completions endpoint
- *                             (Modal vLLM, Nebius, Together, OpenAI, …) via
- *                             plain fetch (no extra dependency).
+ * Two tiers let you spend cleverly (e.g. cheap open model on Modal for the
+ * high-volume agent loop, Claude for the customer/council-facing documents):
  *
- * To run the whole app on a Modal-hosted model, set:
- *   LLM_PROVIDER=openai
- *   LLM_BASE_URL=https://<your-modal-endpoint>/v1   # must be OpenAI-compatible
- *   LLM_MODEL=<model name the endpoint serves>
- *   LLM_API_KEY=<token if the endpoint requires one>   # optional
- * Everything else (web letters, voice letters, the agent workforce) flows
- * through this module, so nothing else has to change.
+ *   • QUALITY tier — customer/council artifacts + web/voice letters.
+ *       STELLA_ARTIFACT_PROVIDER (anthropic|openai)   default: LLM_PROVIDER or anthropic
+ *       STELLA_ARTIFACT_MODEL                          default: claude-opus-4-8 / LLM_MODEL
+ *   • FAST tier — short agent reasoning lines in the activity feed.
+ *       STELLA_AGENT_PROVIDER (anthropic|openai)       default: LLM_PROVIDER or anthropic
+ *       STELLA_AGENT_MODEL                             default: claude-haiku-4-5 / LLM_MODEL
+ *
+ * When a tier resolves to "openai" it uses ONE OpenAI-compatible connection
+ * (LLM_BASE_URL + LLM_MODEL + Modal-Key/Secret or LLM_API_KEY) — e.g. a
+ * Modal Managed Inference Endpoint, which serves the OpenAI API under /v1.
+ *
+ * With no env set, both tiers are Claude (opus for artifacts, haiku for the
+ * loop) — i.e. unchanged default behaviour.
  */
 import Anthropic from "@anthropic-ai/sdk";
 
@@ -29,9 +31,57 @@ const SYSTEM =
   "Any monetary figures provided to you are authoritative — reproduce them exactly, never recalculate.";
 
 export type Provider = "anthropic" | "openai";
+export interface Tier {
+  provider: Provider;
+  model: string;
+}
 
-export function provider(): Provider {
+function baseProvider(): Provider {
   return process.env.LLM_PROVIDER === "openai" ? "openai" : "anthropic";
+}
+
+function resolveProvider(envName: string): Provider {
+  const v = process.env[envName];
+  if (v === "openai") return "openai";
+  if (v === "anthropic") return "anthropic";
+  return baseProvider();
+}
+
+export function qualityTier(): Tier {
+  const provider = resolveProvider("STELLA_ARTIFACT_PROVIDER");
+  const model =
+    process.env.STELLA_ARTIFACT_MODEL ??
+    (provider === "openai" ? process.env.LLM_MODEL || "default" : process.env.ANTHROPIC_MODEL || "claude-opus-4-8");
+  return { provider, model };
+}
+
+export function fastTier(): Tier {
+  const provider = resolveProvider("STELLA_AGENT_PROVIDER");
+  const model =
+    process.env.STELLA_AGENT_MODEL ??
+    (provider === "openai" ? process.env.LLM_MODEL || "default" : "claude-haiku-4-5");
+  return { provider, model };
+}
+
+function tierAvailable(t: Tier): boolean {
+  return t.provider === "openai" ? Boolean(process.env.LLM_BASE_URL) : Boolean(process.env.ANTHROPIC_API_KEY);
+}
+
+export function reasonAvailable(): boolean {
+  return tierAvailable(fastTier());
+}
+export function artifactAvailable(): boolean {
+  return tierAvailable(qualityTier());
+}
+
+/** Human-readable LLM config for the console header. */
+export function llmStatus() {
+  const f = fastTier();
+  const q = qualityTier();
+  return {
+    reasoning: { ...f, available: tierAvailable(f) },
+    artifacts: { ...q, available: tierAvailable(q) },
+  };
 }
 
 // ── Anthropic backend ────────────────────────────────────────────────────────
@@ -45,11 +95,25 @@ function client(): Anthropic {
   return _client;
 }
 
+async function anthropicComplete(prompt: string, system: string, model: string, maxTokens: number): Promise<string> {
+  const message = await client().messages.create({
+    model,
+    max_tokens: maxTokens,
+    system,
+    messages: [{ role: "user", content: prompt }],
+  });
+  return message.content
+    .filter((b): b is Anthropic.TextBlock => b.type === "text")
+    .map((b) => b.text)
+    .join("")
+    .trim();
+}
+
 // ── OpenAI-compatible backend (fetch, no dependency) ─────────────────────────
 
 function openaiBase(): string {
   const base = process.env.LLM_BASE_URL;
-  if (!base) throw new Error("LLM_BASE_URL is not set (required for LLM_PROVIDER=openai)");
+  if (!base) throw new Error("LLM_BASE_URL is not set (required for an openai-provider tier)");
   return base.replace(/\/$/, "");
 }
 
@@ -68,18 +132,15 @@ function openaiHeaders(): Record<string, string> {
   return h;
 }
 
-async function openaiComplete(
-  prompt: string,
-  opts: { system: string; model: string; maxTokens: number },
-): Promise<string> {
+async function openaiComplete(prompt: string, system: string, model: string, maxTokens: number): Promise<string> {
   const res = await fetch(`${openaiBase()}/chat/completions`, {
     method: "POST",
     headers: openaiHeaders(),
     body: JSON.stringify({
-      model: opts.model,
-      max_tokens: opts.maxTokens,
+      model,
+      max_tokens: maxTokens,
       messages: [
-        { role: "system", content: opts.system },
+        { role: "system", content: system },
         { role: "user", content: prompt },
       ],
     }),
@@ -147,29 +208,30 @@ function openaiStream(prompt: string, system: string, model: string): Response {
   });
 }
 
-// ── Public surface (provider-agnostic) ───────────────────────────────────────
+// ── Tier-aware core ──────────────────────────────────────────────────────────
 
-/** Default chat model for the active provider. */
-export function model(): string {
-  if (provider() === "openai") return process.env.LLM_MODEL || "default";
-  return process.env.ANTHROPIC_MODEL || "claude-opus-4-8";
+async function complete(prompt: string, system: string, tier: Tier, maxTokens: number): Promise<string> {
+  return tier.provider === "openai"
+    ? openaiComplete(prompt, system, tier.model, maxTokens)
+    : anthropicComplete(prompt, system, tier.model, maxTokens);
 }
 
-/** Fast/cheap model the agent workforce uses for short reasoning/prose. */
-export function agentModel(): string {
-  if (process.env.STELLA_AGENT_MODEL) return process.env.STELLA_AGENT_MODEL;
-  if (provider() === "openai") return process.env.LLM_MODEL || "default";
-  return "claude-haiku-4-5";
+// ── Public surface ───────────────────────────────────────────────────────────
+
+/** FAST tier — short agent reasoning. Throws on error; callers fall back. */
+export function reason(prompt: string, opts: { system: string; maxTokens?: number }): Promise<string> {
+  return complete(prompt, opts.system, fastTier(), opts.maxTokens ?? 200);
 }
 
-/** True when the active provider is configured (lets callers degrade gracefully). */
-export function llmAvailable(): boolean {
-  return provider() === "openai" ? Boolean(process.env.LLM_BASE_URL) : Boolean(process.env.ANTHROPIC_API_KEY);
+/** QUALITY tier — customer/council artifacts. Throws on error; callers fall back. */
+export function artifact(prompt: string, opts: { system: string; maxTokens?: number }): Promise<string> {
+  return complete(prompt, opts.system, qualityTier(), opts.maxTokens ?? 800);
 }
 
-/** Stream a completion as SSE — used by the web letter / grant routes. */
+/** Stream a completion as SSE (web letter / grant routes) — QUALITY tier. */
 export function streamChatResponse(prompt: string, system: string = SYSTEM): Response {
-  if (provider() === "openai") return openaiStream(prompt, system, model());
+  const t = qualityTier();
+  if (t.provider === "openai") return openaiStream(prompt, system, t.model);
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -177,7 +239,7 @@ export function streamChatResponse(prompt: string, system: string = SYSTEM): Res
       const send = (obj: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
       try {
         const messageStream = client().messages.stream({
-          model: model(),
+          model: t.model,
           max_tokens: 4096,
           system,
           messages: [{ role: "user", content: prompt }],
@@ -201,43 +263,7 @@ export function streamChatResponse(prompt: string, system: string = SYSTEM): Res
   });
 }
 
-/** Blocking completion — used by the voice agent where a single string is needed. */
-export async function chat(prompt: string, system: string = SYSTEM): Promise<string> {
-  if (provider() === "openai") return openaiComplete(prompt, { system, model: model(), maxTokens: 4096 });
-  const message = await client().messages.create({
-    model: model(),
-    max_tokens: 4096,
-    system,
-    messages: [{ role: "user", content: prompt }],
-  });
-  return message.content
-    .filter((b): b is Anthropic.TextBlock => b.type === "text")
-    .map((b) => b.text)
-    .join("")
-    .trim();
-}
-
-/**
- * Blocking completion with per-call model / token / system overrides. Used by
- * the agent reasoning layer. Throws on error — callers fall back to a
- * deterministic template so the autonomous loop never stalls.
- */
-export async function completeWith(
-  prompt: string,
-  opts: { system: string; model?: string; maxTokens?: number },
-): Promise<string> {
-  const mdl = opts.model ?? agentModel();
-  const maxTokens = opts.maxTokens ?? 700;
-  if (provider() === "openai") return openaiComplete(prompt, { system: opts.system, model: mdl, maxTokens });
-  const message = await client().messages.create({
-    model: mdl,
-    max_tokens: maxTokens,
-    system: opts.system,
-    messages: [{ role: "user", content: prompt }],
-  });
-  return message.content
-    .filter((b): b is Anthropic.TextBlock => b.type === "text")
-    .map((b) => b.text)
-    .join("")
-    .trim();
+/** Blocking completion (voice agent) — QUALITY tier. */
+export function chat(prompt: string, system: string = SYSTEM): Promise<string> {
+  return complete(prompt, system, qualityTier(), 4096);
 }

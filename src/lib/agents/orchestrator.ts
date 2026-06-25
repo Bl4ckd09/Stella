@@ -21,6 +21,7 @@ import { gbp, seqId } from "./format";
 import { reviewArtifact } from "./compliance";
 import { agentReasoning, composeClaimPack, composeCouncilLetter, composeOutreach } from "./reasoning";
 import { freshBacklog } from "./prospects";
+import { channelVerb, sendOutbound } from "./integrations";
 import type {
   ActionType,
   AgentEvent,
@@ -36,6 +37,9 @@ import type {
   TickResult,
 } from "./types";
 
+/** An event without its assigned id/tick — filled in by makeEvent. */
+type EventDraft = Omit<AgentEvent, "id" | "tick">;
+
 // ── Tunables ────────────────────────────────────────────────────────────────
 
 const PRICES: Record<"claim_pack" | "admin_support", number> = { claim_pack: 49, admin_support: 199 };
@@ -45,7 +49,7 @@ const DELAY_CUSTOMER = 2;
 const DELAY_LOA = 2;
 const DELAY_COUNCIL = 3;
 
-const TERMINAL: ReadonlySet<string> = new Set(["disqualified", "lost", "closed"]);
+const TERMINAL: ReadonlySet<string> = new Set(["disqualified", "lost", "closed", "needs_optin"]);
 
 // ── Deterministic RNG (seeded per deal so the simulation is replayable) ─────
 
@@ -126,6 +130,7 @@ const RISK: Record<ActionType, RiskLevel> = {
   scan: "low",
   qualify: "low",
   disqualify: "low",
+  hold_no_consent: "low",
   outreach: "medium",
   convert: "low",
   lose: "low",
@@ -170,7 +175,11 @@ function nextAction(d: Deal): ActionType | null {
     case "scanning":
       return d.money.estAnnualSaving > 0 ? "qualify" : "disqualify";
     case "qualified":
-      return "outreach";
+      // Outreach is a BATCH operation handled by the parallel dispatcher
+      // (dispatchOutbound), not the one-at-a-time loop — so qualified owners
+      // accumulate and are then contacted together. The consent gate is applied
+      // there. Nothing for the sequential loop to do here.
+      return null;
     case "won_claim_pack":
       return "generate_pack";
     case "pack_delivered":
@@ -195,6 +204,7 @@ const ACTOR: Record<ActionType, AgentId> = {
   scan: "analyst",
   qualify: "analyst",
   disqualify: "analyst",
+  hold_no_consent: "compliance",
   outreach: "closer",
   convert: "closer",
   lose: "closer",
@@ -218,6 +228,7 @@ const PRIORITY: Record<ActionType, number> = {
   convert: 70,
   lose: 68,
   outreach: 60,
+  hold_no_consent: 58,
   qualify: 50,
   disqualify: 48,
   scan: 40,
@@ -292,11 +303,11 @@ function planTick(state: BusinessState): { timer?: { deal: Deal; timer: Timer };
 
 // ── Event + artifact helpers ─────────────────────────────────────────────────
 
-function makeEvent(
-  state: BusinessState,
-  e: Omit<AgentEvent, "id" | "tick">,
-): AgentEvent {
-  return { id: seqId("ev", state.events.length + state.decisionsLogged + 1), tick: state.tick, ...e };
+function makeEvent(state: BusinessState, e: EventDraft): AgentEvent {
+  // decisionsLogged doubles as a monotonic event counter → unique ids even when
+  // several events are minted before being pushed (e.g. a parallel dispatch).
+  state.decisionsLogged += 1;
+  return { id: seqId("ev", state.decisionsLogged), tick: state.tick, ...e };
 }
 
 /** Compose an artifact via the LLM, run compliance, rewrite to the safe template if blocked. */
@@ -352,8 +363,12 @@ async function performAction(
 ): Promise<AgentEvent[]> {
   const agent = ACTOR[action];
   const events: AgentEvent[] = [];
-  const reasoning = await agentReasoning(agent, action, deal, { useLLM });
   deal.updatedTick = state.tick;
+  // These actions craft their own narration; everything else gets a reasoning line.
+  const reasoning =
+    action === "outreach" || action === "hold_no_consent"
+      ? ""
+      : await agentReasoning(agent, action, deal, { useLLM });
 
   switch (action) {
     case "scan": {
@@ -389,17 +404,20 @@ async function performAction(
       }));
       break;
     }
-    case "outreach": {
-      const { artifact, note } = await produceArtifact(deal, "outreach", useLLM);
-      deal.artifacts.push(artifact);
-      deal.stage = "contacted";
-      deal.waitUntil = state.tick + DELAY_CUSTOMER;
-      deal.history.push(`Outreach sent via ${deal.channel}`);
+    case "hold_no_consent": {
+      // Consent gate: eligible, but no opt-in on file → never cold-contact.
+      deal.stage = "needs_optin";
+      deal.history.push("Held: no consent on file — cannot contact (cold outreach is not allowed)");
       events.push(makeEvent(state, {
-        agent, action, dealId: deal.id, risk: RISK[action], reasoning,
-        headline: `Sent free-scan summary + options to ${deal.business.contact} (${deal.channel})`,
+        agent, action, dealId: deal.id, risk: RISK[action], blocked: true,
+        reasoning: "No consent/opt-in on file. The PRD bans cold outreach, so this owner can't be contacted until they opt in.",
+        headline: `🛡️ Holding ${deal.business.name} — eligible but no consent to contact`,
       }));
-      events.push(complianceEvent(state, deal, artifact, note));
+      break;
+    }
+    case "outreach": {
+      const drafts = await prepareOutreach(deal, useLLM, state.tick);
+      for (const d of drafts) events.push(makeEvent(state, d));
       break;
     }
     case "generate_pack": {
@@ -484,9 +502,9 @@ async function performAction(
   return events;
 }
 
-function complianceEvent(state: BusinessState, deal: Deal, artifact: Artifact, note: string): AgentEvent {
+function complianceDraft(deal: Deal, artifact: Artifact, note: string): EventDraft {
   const v = artifact.review!;
-  return makeEvent(state, {
+  return {
     agent: "compliance",
     action: "qualify", // label only; compliance reviews are informational
     dealId: deal.id,
@@ -496,7 +514,53 @@ function complianceEvent(state: BusinessState, deal: Deal, artifact: Artifact, n
     headline: v.pass
       ? `Reviewed ${artifact.kind.replace("_", " ")} for ${deal.business.name} — PASS (${note})`
       : `BLOCKED ${artifact.kind.replace("_", " ")} for ${deal.business.name}`,
-  });
+  };
+}
+
+function complianceEvent(state: BusinessState, deal: Deal, artifact: Artifact, note: string): AgentEvent {
+  return makeEvent(state, complianceDraft(deal, artifact, note));
+}
+
+/**
+ * Compose → compliance-check → SEND one outbound contact, mutating the deal.
+ * Returns event drafts (no ids) so it can be run in parallel and the caller
+ * assigns ids afterwards. Shared by the sequential loop and the dispatcher.
+ */
+async function prepareOutreach(deal: Deal, useLLM: boolean, tick: number, visualize = false): Promise<EventDraft[]> {
+  deal.updatedTick = tick;
+  const reasoning = await agentReasoning("closer", "outreach", deal, { useLLM });
+  const { artifact, note } = await produceArtifact(deal, "outreach", useLLM);
+  deal.artifacts.push(artifact);
+  const sent = await sendOutbound(deal, artifact, { simulateLatency: visualize });
+  deal.stage = "contacted";
+  deal.waitUntil = tick + DELAY_CUSTOMER;
+  deal.history.push(`Outreach ${sent.simulated ? "(sandbox) " : ""}via ${deal.channel} — ${sent.detail}`);
+  return [
+    {
+      agent: "closer",
+      action: "outreach",
+      dealId: deal.id,
+      risk: RISK.outreach,
+      reasoning,
+      channel: deal.channel,
+      headline: `${channelVerb(deal.channel)} ${deal.business.contact} at ${deal.business.name}${sent.simulated ? " (sandbox)" : ""}`,
+    },
+    complianceDraft(deal, artifact, note),
+  ];
+}
+
+/** Bounded-concurrency map — runs at most `limit` tasks at once. */
+async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let i = 0;
+  async function worker() {
+    while (i < items.length) {
+      const idx = i++;
+      out[idx] = await fn(items[idx]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
 }
 
 // ── Resolving a world reply (customer / LoA / council) ───────────────────────
@@ -599,7 +663,9 @@ async function sourceProspect(state: BusinessState, useLLM: boolean): Promise<Ag
     money: { estAnnualSaving: 0, estBackdated: 0, confirmedBackdated: null },
     findings: [],
     confidence: "none",
-    channel: hashString(p.uarn) % 2 === 0 ? "whatsapp" : "email",
+    channel: p.channel,
+    consent: p.consent,
+    consentSource: p.consentSource,
     authorized: false,
     artifacts: [],
     history: ["Sourced into pipeline"],
@@ -670,9 +736,8 @@ export async function tick(prev: BusinessState, opts: TickOptions = {}): Promise
   }
   // plan.kind === "idle" → no events; company is caught up.
 
-  // Bookkeeping + live agent status.
+  // Bookkeeping + live agent status. (ids/counter handled in makeEvent.)
   state.events.push(...events);
-  state.decisionsLogged += events.length;
   for (const a of ALL_AGENTS) state.agentStatus[a] = "idle";
   for (const e of events) state.agentStatus[e.agent] = e.blocked ? "blocked" : "working";
 
@@ -686,6 +751,96 @@ function approvalSummary(deal: Deal, action: ActionType): string {
   if (action === "draft_letter") return `draft a council letter for ${deal.business.name}`;
   if (action === "request_authorization") return `request authority from ${deal.business.contact}`;
   return `${action} for ${deal.business.name}`;
+}
+
+// ── Parallel outbound campaign ───────────────────────────────────────────────
+
+export interface DispatchOptions {
+  useLLM?: boolean;
+  concurrency?: number;
+  /** Add a small per-contact "connecting" delay so concurrency is observable in
+   * the UI. Default true; set false for headless/test runs. */
+  simulateLatency?: boolean;
+}
+
+export interface DispatchResult {
+  state: BusinessState;
+  events: AgentEvent[];
+  dispatched: number;
+  skipped: number;
+}
+
+/**
+ * Fire outbound contact to every qualified+consented owner AT ONCE.
+ *
+ * This is where the workforce "initiates" — voice calls, WhatsApp and email go
+ * out concurrently (bounded by `concurrency`), so the wall-clock is the slowest
+ * single contact, not the sum. Owners with no consent on file are NOT contacted
+ * — they're surfaced as skipped and held (PRD bans cold outreach). One logical
+ * step: all events share a batch id and the current tick.
+ */
+export async function dispatchOutbound(prev: BusinessState, opts: DispatchOptions = {}): Promise<DispatchResult> {
+  const useLLM = opts.useLLM ?? false;
+  const visualize = opts.simulateLatency ?? true;
+  const concurrency = Math.min(Math.max(1, opts.concurrency ?? 6), 12);
+  const state: BusinessState = structuredClone(prev);
+  if (!state.running) return { state, events: [], dispatched: 0, skipped: 0 };
+
+  state.tick += 1;
+  const batch = seqId("batch", state.tick);
+
+  const ready = state.deals.filter((d) => d.stage === "qualified" && d.consent && d.waitUntil === null);
+  const noConsent = state.deals.filter((d) => d.stage === "qualified" && !d.consent);
+
+  // Contact the consented owners concurrently. Each task is self-contained
+  // (mutates its own deal, returns drafts) so there are no cross-task races.
+  const batches = await mapLimit(ready, concurrency, async (d) => {
+    try {
+      return await prepareOutreach(d, useLLM, state.tick, visualize);
+    } catch {
+      return [] as EventDraft[];
+    }
+  });
+
+  // Hold the non-consented owners.
+  for (const d of noConsent) {
+    d.stage = "needs_optin";
+    d.updatedTick = state.tick;
+    d.history.push("Held: no consent on file — cannot contact (cold outreach is not allowed)");
+  }
+
+  const drafts: EventDraft[] = [];
+  if (ready.length) {
+    drafts.push({
+      agent: "orchestrator",
+      action: "outreach",
+      dealId: null,
+      risk: "medium",
+      batch,
+      reasoning: `Firing ${ready.length} contact${ready.length > 1 ? "s" : ""} concurrently across voice, WhatsApp and email; ${noConsent.length} eligible owner(s) skipped for lack of consent.`,
+      headline: `📣 Outbound campaign — contacting ${ready.length} consented owner${ready.length > 1 ? "s" : ""} in parallel`,
+    });
+  }
+  for (const b of batches) for (const d of b) drafts.push({ ...d, batch });
+  for (const d of noConsent) {
+    drafts.push({
+      agent: "compliance",
+      action: "hold_no_consent",
+      dealId: d.id,
+      risk: "low",
+      blocked: true,
+      batch,
+      reasoning: "No consent on file — cold outreach is not allowed.",
+      headline: `🛡️ Skipped ${d.business.name} — no consent to contact`,
+    });
+  }
+
+  const events = drafts.map((d) => makeEvent(state, d));
+  state.events.push(...events);
+  for (const a of ALL_AGENTS) state.agentStatus[a] = "idle";
+  for (const e of events) state.agentStatus[e.agent] = e.blocked ? "blocked" : "working";
+
+  return { state, events, dispatched: ready.length, skipped: noConsent.length };
 }
 
 // ── Human approval handling (called from the API on the human's behalf) ──────
@@ -706,7 +861,19 @@ export function decideApproval(prev: BusinessState, approvalId: string, decision
   return state;
 }
 
-/** Whether there is any more autonomous work to do (drives the console loop). */
+/** Qualified owners waiting for a parallel outbound campaign. */
+export function outreachReady(state: BusinessState): { toContact: number; toHold: number } {
+  let toContact = 0;
+  let toHold = 0;
+  for (const d of state.deals) {
+    if (d.stage !== "qualified") continue;
+    if (d.consent) toContact++;
+    else toHold++;
+  }
+  return { toContact, toHold };
+}
+
+/** Whether there is any more sequential (tick) work to do. */
 export function hasWork(state: BusinessState): boolean {
   if (!state.running) return false;
   if (state.backlog.length > 0 && state.deals.filter(isActive).length < MAX_WIP) return true;

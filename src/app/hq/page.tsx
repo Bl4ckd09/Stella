@@ -19,6 +19,7 @@ const STAGE_LABEL: Record<Stage, string> = {
   scanning: "Scanning",
   qualified: "Qualified",
   disqualified: "Dropped — ineligible",
+  needs_optin: "No consent — not contacted",
   contacted: "Awaiting reply",
   won_claim_pack: "Won — Claim Pack",
   won_admin: "Won — Admin Support",
@@ -40,8 +41,18 @@ const COLUMNS: { title: string; stages: Stage[] }[] = [
   { title: "Won", stages: ["won_claim_pack", "won_admin"] },
   { title: "Case work", stages: ["pack_delivered", "awaiting_authorization", "authorized", "ready_to_submit", "submitted", "awaiting_council", "outcome_recorded"] },
   { title: "Closed", stages: ["closed"] },
-  { title: "Dropped", stages: ["disqualified", "lost"] },
+  { title: "Dropped / Held", stages: ["disqualified", "lost", "needs_optin"] },
 ];
+
+interface LlmTier {
+  provider: string;
+  model: string;
+  available: boolean;
+}
+interface LlmStatus {
+  reasoning: LlmTier;
+  artifacts: LlmTier;
+}
 
 const AUTONOMY_HINT: Record<AutonomyLevel, string> = {
   supervised: "You approve every customer/council-facing action.",
@@ -57,8 +68,10 @@ export default function HQ() {
   const [autoApprove, setAutoApprove] = useState(false);
   const [speed, setSpeed] = useState(1400);
   const [busy, setBusy] = useState(false);
+  const [dispatching, setDispatching] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [llm, setLlm] = useState<LlmStatus | null>(null);
 
   const stateRef = useRef<BusinessState | null>(null);
   stateRef.current = state;
@@ -73,6 +86,7 @@ export default function HQ() {
     const data = await res.json();
     setState(data.state);
     setMore(data.hasWork);
+    if (data.llm) setLlm(data.llm);
   }, []);
 
   useEffect(() => {
@@ -117,11 +131,41 @@ export default function HQ() {
     if (decision === "approved") setMore(true);
   }, []);
 
-  const pending = state?.approvals.filter((a) => a.decided === null) ?? [];
+  const runDispatch = useCallback(async () => {
+    const cur = stateRef.current;
+    if (!cur || dispatching) return;
+    setDispatching(true);
+    try {
+      const res = await fetch("/api/agents/dispatch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ state: cur, useLLM }),
+      });
+      if (!res.ok) throw new Error(`dispatch failed (${res.status})`);
+      const data = await res.json();
+      setState(data.state);
+      setMore(data.hasWork);
+      setErr(null);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "dispatch error");
+    } finally {
+      setDispatching(false);
+    }
+  }, [dispatching, useLLM]);
 
-  // The autonomous driver: while running, schedule the next tick.
+  const pending = state?.approvals.filter((a) => a.decided === null) ?? [];
+  const readyToContact = state?.deals.filter((d) => d.stage === "qualified").length ?? 0;
+
+  // The autonomous driver: while running, schedule the next step — a parallel
+  // outbound campaign when owners have accumulated, otherwise a single tick.
   useEffect(() => {
-    if (!auto || !state || !state.running || busy) return;
+    if (!auto || !state || !state.running || busy || dispatching) return;
+    // Let owners accumulate, then contact a batch in parallel — fire when a few
+    // are ready, or when there's nothing else to do (flush the remainder).
+    if (readyToContact >= 3 || (readyToContact > 0 && !more)) {
+      const t = setTimeout(runDispatch, speed);
+      return () => clearTimeout(t);
+    }
     if (!more) {
       // Stalled. If only pending approvals remain and auto-approve is on, clear one.
       if (pending.length && autoApprove) {
@@ -132,7 +176,7 @@ export default function HQ() {
     }
     const t = setTimeout(tickOnce, speed);
     return () => clearTimeout(t);
-  }, [auto, state, busy, more, speed, tickOnce, pending, autoApprove, decide]);
+  }, [auto, state, busy, dispatching, more, readyToContact, speed, tickOnce, runDispatch, pending, autoApprove, decide]);
 
   const reset = useCallback(() => {
     setAuto(false);
@@ -170,6 +214,14 @@ export default function HQ() {
           {auto ? "⏸ Pause" : "▶ Go hands-off"}
         </button>
         <button className="ghost" onClick={tickOnce} disabled={auto || busy || !more}>Step</button>
+        <button
+          className="campaign"
+          onClick={runDispatch}
+          disabled={dispatching || readyToContact === 0}
+          title="Contact every qualified, consented owner at once (voice / WhatsApp / email)"
+        >
+          {dispatching ? "📣 Dialing…" : `📣 Outbound campaign${readyToContact ? ` (${readyToContact})` : ""}`}
+        </button>
         <button className="ghost" onClick={reset}>Reset</button>
 
         <div className="hq-seg">
@@ -202,7 +254,17 @@ export default function HQ() {
           {state.running ? "● live" : "■ stopped"}
         </button>
       </div>
-      <p className="hq-hint">{AUTONOMY_HINT[state.autonomy]} {err && <span className="error"> · {err}</span>}</p>
+      <p className="hq-hint">
+        {AUTONOMY_HINT[state.autonomy]}
+        {llm && (
+          <span className="hq-llm">
+            {" · "}🧠 reasoning: <b>{llm.reasoning.provider === "openai" ? `Modal ${llm.reasoning.model}` : llm.reasoning.model}</b>
+            {" · "}📄 letters: <b>{llm.artifacts.provider === "openai" ? `Modal ${llm.artifacts.model}` : llm.artifacts.model}</b>
+            {!useLLM && <span className="muted"> (toggle “AI reasoning” to use them live)</span>}
+          </span>
+        )}
+        {err && <span className="error"> · {err}</span>}
+      </p>
 
       {/* KPIs */}
       <div className="hq-kpis">
@@ -269,7 +331,7 @@ export default function HQ() {
             </div>
             {recent.length === 0 && <div className="hq-empty">Press <b>Go hands-off</b> and walk away.</div>}
             {recent.map((e) => (
-              <div className={`hq-event ${e.blocked ? "blocked" : ""} risk-${e.risk}`} key={e.id} onClick={() => e.dealId && setSelected(e.dealId)}>
+              <div className={`hq-event ${e.blocked ? "blocked" : ""} ${e.batch ? "batch" : ""} risk-${e.risk}`} key={e.id} onClick={() => e.dealId && setSelected(e.dealId)}>
                 <div className="head">
                   <span className="who">{agentEmoji(e.agent)} {agentName(e.agent)}</span>
                   <span className="t">#{e.tick}</span>
@@ -302,11 +364,14 @@ function DealChip({ deal, onClick, active }: { deal: Deal; onClick: () => void; 
     : deal.money.estAnnualSaving > 0
       ? `${gbp(deal.money.estAnnualSaving)}/yr est.`
       : "—";
+  const chan = deal.channel === "voice" ? "📞" : deal.channel === "whatsapp" ? "💬" : "✉️";
   return (
     <div className={`hq-chip ${active ? "active" : ""}`} onClick={onClick}>
       <div className="n">{deal.business.name}</div>
       <div className="s">{STAGE_LABEL[deal.stage]}</div>
-      <div className="m">{money} · {deal.business.borough}</div>
+      <div className="m">
+        {money} · {chan} {deal.consent ? <span className="ok-tag">opted in</span> : <span className="no-tag">no consent</span>}
+      </div>
     </div>
   );
 }
@@ -319,6 +384,14 @@ function DealDrawer({ deal, onClose }: { deal: Deal; onClose: () => void }) {
         <h2>{deal.business.name}</h2>
         <div className="sub">{deal.business.address}, {deal.business.postcode} · {deal.business.borough} · {deal.business.sector}</div>
         <div className="sub">Owner: {deal.business.contact} · channel: {deal.channel} · status: {STAGE_LABEL[deal.stage]}</div>
+        <div className="sub">
+          Consent:{" "}
+          {deal.consent ? (
+            <span className="ok-tag">opted in — {deal.consentSource}</span>
+          ) : (
+            <span className="no-tag">no consent on file — cannot be contacted (no cold outreach)</span>
+          )}
+        </div>
 
         <div className="hq-money">
           <div><span>RV</span>{gbp(deal.business.rateableValue)}</div>
