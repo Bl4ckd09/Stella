@@ -72,10 +72,13 @@ export default function HQ() {
   const [selected, setSelected] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [llm, setLlm] = useState<LlmStatus | null>(null);
+  const [view, setView] = useState<"live" | "history">("live");
 
   const stateRef = useRef<BusinessState | null>(null);
   stateRef.current = state;
   const busyRef = useRef(false);
+  const runIdRef = useRef("");
+  const labelRef = useRef("");
 
   const boot = useCallback(async (autonomy: AutonomyLevel) => {
     const res = await fetch("/api/agents/tick", {
@@ -90,6 +93,9 @@ export default function HQ() {
   }, []);
 
   useEffect(() => {
+    // One run id per console session (client-only → no hydration mismatch).
+    runIdRef.current = crypto.randomUUID();
+    labelRef.current = `Run ${new Date().toLocaleString()}`;
     boot("assisted");
   }, [boot]);
 
@@ -102,7 +108,7 @@ export default function HQ() {
       const res = await fetch("/api/agents/tick", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ state: cur, useLLM }),
+        body: JSON.stringify({ state: cur, useLLM, runId: runIdRef.current, label: labelRef.current }),
       });
       if (!res.ok) throw new Error(`tick failed (${res.status})`);
       const data = await res.json();
@@ -139,7 +145,7 @@ export default function HQ() {
       const res = await fetch("/api/agents/dispatch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ state: cur, useLLM }),
+        body: JSON.stringify({ state: cur, useLLM, runId: runIdRef.current, label: labelRef.current }),
       });
       if (!res.ok) throw new Error(`dispatch failed (${res.status})`);
       const data = await res.json();
@@ -205,9 +211,17 @@ export default function HQ() {
           <h1>Stella · Hands-Off HQ</h1>
           <p className="sub">A business that runs itself. You set the guardrails — the AI workforce does the work.</p>
         </div>
-        <a className="hq-back" href="/">← the free scanner</a>
+        <div className="hq-tabs">
+          <button className={view === "live" ? "on" : ""} onClick={() => setView("live")}>● Live control</button>
+          <button className={view === "history" ? "on" : ""} onClick={() => setView("history")}>≣ History</button>
+          <a className="hq-back" href="/">← scanner</a>
+        </div>
       </header>
 
+      {view === "history" ? (
+        <HistoryView />
+      ) : (
+      <>
       {/* Controls */}
       <div className="hq-controls">
         <button className={`primary ${auto ? "danger" : ""}`} onClick={() => setAuto((a) => !a)}>
@@ -345,6 +359,76 @@ export default function HQ() {
       </div>
 
       {selectedDeal && <DealDrawer deal={selectedDeal} onClose={() => setSelected(null)} />}
+      </>
+      )}
+    </div>
+  );
+}
+
+interface RunSummary {
+  id: string; label: string | null; autonomy: string | null; tick: number;
+  revenue: number; client_value: number; customers: number; decisions: number;
+  created_at: string; updated_at: string;
+}
+interface StoredEvent {
+  seq: number; tick: number; agent: string; action: string; deal_id: string | null;
+  risk: string | null; blocked: boolean; batch: string | null; channel: string | null;
+  headline: string; reasoning: string | null; created_at: string;
+}
+
+function HistoryView() {
+  const [runs, setRuns] = useState<RunSummary[] | null>(null);
+  const [enabled, setEnabled] = useState(true);
+  const [sel, setSel] = useState<string | null>(null);
+  const [events, setEvents] = useState<StoredEvent[] | null>(null);
+
+  useEffect(() => {
+    fetch("/api/agents/history")
+      .then((r) => r.json())
+      .then((d) => { setEnabled(d.enabled !== false); setRuns(d.runs ?? []); })
+      .catch(() => { setEnabled(false); setRuns([]); });
+  }, []);
+
+  useEffect(() => {
+    if (!sel) { setEvents(null); return; }
+    setEvents(null);
+    fetch(`/api/agents/history?runId=${encodeURIComponent(sel)}`)
+      .then((r) => r.json())
+      .then((d) => setEvents(d.events ?? []))
+      .catch(() => setEvents([]));
+  }, [sel]);
+
+  if (!enabled) return <div className="hq-empty">Persistent history is off — set <code>DATABASE_URL</code> (Supabase) to record runs.</div>;
+  if (!runs) return <div className="hq-empty">Loading history…</div>;
+  if (!runs.length) return <div className="hq-empty">No runs recorded yet. Switch to <b>Live control</b> and press <b>Go hands-off</b>.</div>;
+
+  return (
+    <div className="hq-history">
+      <div className="hq-runs">
+        <div className="hq-runs-head">Recorded runs</div>
+        {runs.map((r) => (
+          <div key={r.id} className={`hq-run ${sel === r.id ? "active" : ""}`} onClick={() => setSel(r.id)}>
+            <div className="rl">{r.label ?? r.id.slice(0, 8)}</div>
+            <div className="rm">{gbp(r.revenue)} rev · {gbp(r.client_value)} delivered · {r.customers} cust · {r.decisions} decisions</div>
+            <div className="rd">{new Date(r.updated_at).toLocaleString()} · {r.autonomy} · cycle #{r.tick}</div>
+          </div>
+        ))}
+      </div>
+      <div className="hq-feed hq-runevents">
+        <div className="hq-feed-head">Audit trail{sel ? "" : " — select a run"}</div>
+        {sel && !events && <div className="hq-empty">Loading…</div>}
+        {sel && events && events.length === 0 && <div className="hq-empty">No events.</div>}
+        {sel && events && events.map((e) => (
+          <div className={`hq-event ${e.blocked ? "blocked" : ""} ${e.batch ? "batch" : ""} risk-${e.risk}`} key={e.seq}>
+            <div className="head">
+              <span className="who">{agentEmoji(e.agent as AgentId)} {agentName(e.agent as AgentId)}</span>
+              <span className="t">#{e.tick}</span>
+            </div>
+            <div className="hl">{e.headline}</div>
+            {e.reasoning && <div className="rz">{e.reasoning}</div>}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

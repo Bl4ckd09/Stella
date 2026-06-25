@@ -9,6 +9,7 @@
  */
 import { NextResponse } from "next/server";
 import { dispatchOutbound, hasWork } from "@/lib/agents/orchestrator";
+import { persistRun } from "@/lib/agents/persistence";
 import type { BusinessState } from "@/lib/agents/types";
 
 export const runtime = "nodejs";
@@ -16,7 +17,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function POST(req: Request) {
-  let body: { state?: BusinessState; useLLM?: boolean; concurrency?: number };
+  let body: { state?: BusinessState; useLLM?: boolean; concurrency?: number; runId?: string; label?: string };
   try {
     body = await req.json();
   } catch {
@@ -25,5 +26,6 @@ export async function POST(req: Request) {
   if (!body.state) return NextResponse.json({ error: "missing_state" }, { status: 400 });
 
   const res = await dispatchOutbound(body.state, { useLLM: body.useLLM ?? false, concurrency: body.concurrency });
+  if (body.runId) await persistRun(body.runId, res.state, res.events, body.label);
   return NextResponse.json({ ...res, hasWork: hasWork(res.state) });
 }

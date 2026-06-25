@@ -12,6 +12,7 @@
  */
 import { NextResponse } from "next/server";
 import { initState, tick, hasWork } from "@/lib/agents/orchestrator";
+import { persistRun } from "@/lib/agents/persistence";
 import { llmStatus } from "@/lib/llm";
 import type { AgentEvent, AutonomyLevel, BusinessState } from "@/lib/agents/types";
 
@@ -24,6 +25,8 @@ export async function POST(req: Request) {
     useLLM?: boolean;
     steps?: number;
     autonomy?: AutonomyLevel;
+    runId?: string;
+    label?: string;
   };
   try {
     body = await req.json();
@@ -47,5 +50,6 @@ export async function POST(req: Request) {
     if (!hasWork(state)) break;
   }
 
+  if (body.runId) await persistRun(body.runId, state, events, body.label);
   return NextResponse.json({ state, events, hasWork: hasWork(state) });
 }
