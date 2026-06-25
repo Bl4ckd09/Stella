@@ -1,5 +1,11 @@
 # Stella — Unclaimed Business Money Engine (cloud rebuild)
 
+> 🤖 **Hands-Off HQ (`/hq`)** — the `autonomous-agents` branch turns Stella into a
+> *self-running business operated entirely by an AI workforce* for the Cursor
+> "Hands Off" hackathon. Press **Go hands-off** and watch seven agents source,
+> qualify, sell, and file claims live — with a compliance guard, a hard
+> authorization gate, and a human approval queue. See **[HACKATHON.md](./HACKATHON.md)**.
+
 Helps London small businesses find unclaimed **Small Business Rate Relief** and
 grants. Two channels share one deterministic engine:
 

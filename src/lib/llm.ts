@@ -80,3 +80,39 @@ export async function chat(prompt: string, system: string = SYSTEM): Promise<str
     .join("")
     .trim();
 }
+
+/** True when an Anthropic key is configured (lets callers degrade gracefully). */
+export function llmAvailable(): boolean {
+  return Boolean(process.env.ANTHROPIC_API_KEY);
+}
+
+/**
+ * Model used by the autonomous agent workforce for short reasoning/prose. The
+ * loop ticks frequently, so this defaults to a fast, cheap model; override with
+ * STELLA_AGENT_MODEL (e.g. claude-opus-4-8 for top-quality artifacts).
+ */
+export function agentModel(): string {
+  return process.env.STELLA_AGENT_MODEL || "claude-haiku-4-5";
+}
+
+/**
+ * Blocking completion with per-call model / token / system overrides. Used by
+ * the agent reasoning layer. Throws on API error — callers fall back to a
+ * deterministic template so the autonomous loop never stalls.
+ */
+export async function completeWith(
+  prompt: string,
+  opts: { system: string; model?: string; maxTokens?: number },
+): Promise<string> {
+  const message = await client().messages.create({
+    model: opts.model ?? agentModel(),
+    max_tokens: opts.maxTokens ?? 700,
+    system: opts.system,
+    messages: [{ role: "user", content: prompt }],
+  });
+  return message.content
+    .filter((b): b is Anthropic.TextBlock => b.type === "text")
+    .map((b) => b.text)
+    .join("")
+    .trim();
+}

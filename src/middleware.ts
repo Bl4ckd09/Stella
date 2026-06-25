@@ -7,6 +7,7 @@ export const config = { matcher: "/api/:path*" };
 const WINDOW_MS = 60_000;
 const API_LIMIT = 30; // per IP/min for browser-facing API
 const VOICE_LIMIT = 120; // /api/voice-lookup is secret-gated → allow more
+const AGENTS_LIMIT = 600; // the Mission Control console ticks the loop frequently (same-origin)
 
 function clientIp(req: NextRequest): string {
   return (
@@ -29,10 +30,13 @@ export function middleware(req: NextRequest) {
   // server calls from ElevenLabs, gated by their own X-Tool-Secret header and
   // carrying no Origin — exempt them from the same-origin check.
   const isVoice = path.startsWith("/api/voice-");
+  const isAgents = path.startsWith("/api/agents");
   const ip = clientIp(req);
 
   // 1) Rate limit per IP.
-  const rl = rateLimit(`${ip}:${isVoice ? "voice" : "api"}`, isVoice ? VOICE_LIMIT : API_LIMIT, WINDOW_MS);
+  const bucket = isVoice ? "voice" : isAgents ? "agents" : "api";
+  const limit = isVoice ? VOICE_LIMIT : isAgents ? AGENTS_LIMIT : API_LIMIT;
+  const rl = rateLimit(`${ip}:${bucket}`, limit, WINDOW_MS);
   if (!rl.ok) {
     return new NextResponse(JSON.stringify({ error: "rate_limited" }), {
       status: 429,

@@ -131,6 +131,9 @@ export default function Home() {
           <span className="big">£317m</span> in Small Business Rate Relief goes unclaimed in London every year.
           Enter your business to see what you can claim.
         </p>
+        <a className="hq-banner" href="/hq">
+          🤖 <b>New: Stella runs itself.</b> Watch an AI workforce source, qualify, sell and file claims live in Hands-Off HQ →
+        </a>
       </div>
 
       <div className="card">
