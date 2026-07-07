@@ -117,6 +117,26 @@ function openaiBase(): string {
   return base.replace(/\/$/, "");
 }
 
+/**
+ * DashScope (Qwen Cloud) extras. Qwen3 hybrid models can default to thinking
+ * mode, which slows the agent loop and burns output tokens on reasoning we
+ * never show — force it off unless QWEN_ENABLE_THINKING=true. Gated on the
+ * DashScope host so other OpenAI-compatible servers never see the param.
+ */
+function dashscopeExtras(): Record<string, unknown> {
+  if (!(process.env.LLM_BASE_URL ?? "").includes("dashscope")) return {};
+  return { enable_thinking: process.env.QWEN_ENABLE_THINKING === "true" };
+}
+
+/** Qwen Cloud rate limits are account-wide (qwen3.7-max: 600 RPM) — one
+ *  retry with jitter rides out a 429/5xx burst; callers still fall back. */
+async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+  const res = await fetch(url, init);
+  if (res.status !== 429 && res.status < 500) return res;
+  await new Promise((r) => setTimeout(r, 1000 + Math.random() * 2000));
+  return fetch(url, init);
+}
+
 function openaiHeaders(): Record<string, string> {
   const h: Record<string, string> = { "Content-Type": "application/json" };
   // Modal authenticated endpoints use a proxy-token pair (Modal-Key/Modal-Secret),
@@ -133,12 +153,13 @@ function openaiHeaders(): Record<string, string> {
 }
 
 async function openaiComplete(prompt: string, system: string, model: string, maxTokens: number): Promise<string> {
-  const res = await fetch(`${openaiBase()}/chat/completions`, {
+  const res = await fetchWithRetry(`${openaiBase()}/chat/completions`, {
     method: "POST",
     headers: openaiHeaders(),
     body: JSON.stringify({
       model,
       max_tokens: maxTokens,
+      ...dashscopeExtras(),
       messages: [
         { role: "system", content: system },
         { role: "user", content: prompt },
@@ -157,13 +178,14 @@ function openaiStream(prompt: string, system: string, model: string): Response {
     async start(controller) {
       const send = (obj: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
       try {
-        const res = await fetch(`${openaiBase()}/chat/completions`, {
+        const res = await fetchWithRetry(`${openaiBase()}/chat/completions`, {
           method: "POST",
           headers: openaiHeaders(),
           body: JSON.stringify({
             model,
             max_tokens: 4096,
             stream: true,
+            ...dashscopeExtras(),
             messages: [
               { role: "system", content: system },
               { role: "user", content: prompt },
