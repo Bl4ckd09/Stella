@@ -22,6 +22,8 @@ import { reviewArtifact } from "./compliance";
 import { agentReasoning, composeClaimPack, composeCouncilLetter, composeOutreach } from "./reasoning";
 import { freshBacklog } from "./prospects";
 import { channelVerb, sendOutbound } from "./integrations";
+import { memoriesFromEvents, recallExperience } from "./memory";
+import { choosePlan, plannerAvailable } from "./planner";
 import type {
   ActionType,
   AgentEvent,
@@ -120,6 +122,7 @@ export function initState(autonomy: AutonomyLevel = "assisted"): BusinessState {
     agentStatus,
     backlog: freshBacklog(),
     decisionsLogged: 0,
+    memories: [],
   };
 }
 
@@ -251,7 +254,14 @@ type Plan =
   | { kind: "source" }
   | { kind: "idle" };
 
-function planTick(state: BusinessState): { timer?: { deal: Deal; timer: Timer }; plan: Plan } {
+interface PlanTickResult {
+  timer?: { deal: Deal; timer: Timer };
+  plan: Plan;
+  /** Sorted actionable candidates (for the Qwen planner override). */
+  candidates: { deal: Deal; action: ActionType; score: number }[];
+}
+
+function planTick(state: BusinessState): PlanTickResult {
   // 1. World replies first — the company reacts to inbound before initiating.
   let dueDeal: Deal | null = null;
   let due: Timer | null = null;
@@ -262,7 +272,7 @@ function planTick(state: BusinessState): { timer?: { deal: Deal; timer: Timer };
       due = t;
     }
   }
-  if (dueDeal && due) return { timer: { deal: dueDeal, timer: due }, plan: { kind: "idle" } };
+  if (dueDeal && due) return { timer: { deal: dueDeal, timer: due }, plan: { kind: "idle" }, candidates: [] };
 
   // 2. Otherwise pick the best agent action.
   const active = state.deals.filter(isActive).length;
@@ -285,20 +295,25 @@ function planTick(state: BusinessState): { timer?: { deal: Deal; timer: Timer };
 
   // Keep the pipeline full early: prioritise sourcing when WIP is low.
   const canSource = state.backlog.length > 0 && active < MAX_WIP;
-  if (canSource && active < MIN_WIP) return { plan: { kind: "source" } };
+  if (canSource && active < MIN_WIP) return { plan: { kind: "source" }, candidates: [] };
 
   if (candidates.length) {
     candidates.sort((x, y) => y.score - x.score || x.deal.createdTick - y.deal.createdTick);
     const best = candidates[0];
-    if (requiresApproval(RISK[best.action], state.autonomy)) {
-      const ap = latestApproval(state, best.deal.id, best.action);
-      if (!ap) return { plan: { kind: "request_approval", deal: best.deal, action: best.action } };
-    }
-    return { plan: { kind: "act", deal: best.deal, action: best.action } };
+    return { plan: planFor(state, best.deal, best.action), candidates: candidates.slice(0, 5) };
   }
 
-  if (canSource) return { plan: { kind: "source" } };
-  return { plan: { kind: "idle" } };
+  if (canSource) return { plan: { kind: "source" }, candidates: [] };
+  return { plan: { kind: "idle" }, candidates: [] };
+}
+
+/** Act, unless the action is approval-gated and not yet approved. */
+function planFor(state: BusinessState, deal: Deal, action: ActionType): Plan {
+  if (requiresApproval(RISK[action], state.autonomy)) {
+    const ap = latestApproval(state, deal.id, action);
+    if (!ap) return { kind: "request_approval", deal, action };
+  }
+  return { kind: "act", deal, action };
 }
 
 // ── Event + artifact helpers ─────────────────────────────────────────────────
@@ -699,8 +714,34 @@ export async function tick(prev: BusinessState, opts: TickOptions = {}): Promise
 
   state.tick += 1;
   let events: AgentEvent[] = [];
+  const preEvents: AgentEvent[] = [];
 
-  const { timer, plan } = planTick(state);
+  const planned = planTick(state);
+  let { plan } = planned;
+  const { timer, candidates } = planned;
+
+  // Qwen planner: let Ada re-order among the pre-vetted candidates. A null
+  // (unavailable / error / invalid index) keeps the deterministic order.
+  if (!timer && useLLM && candidates.length >= 2 && plannerAvailable()) {
+    const recall = await recallExperience(state, candidates[0].deal, candidates[0].action);
+    const choice = await choosePlan(candidates, recall?.text ?? null);
+    if (choice && choice.index > 0) {
+      const chosen = candidates[choice.index];
+      plan = planFor(state, chosen.deal, chosen.action);
+      preEvents.push(
+        makeEvent(state, {
+          agent: "orchestrator",
+          action: chosen.action,
+          dealId: chosen.deal.id,
+          risk: "low",
+          headline: `🧭 Ada re-prioritised: ${chosen.action} for ${chosen.deal.business.name}`,
+          reasoning:
+            choice.rationale +
+            (recall ? ` (drew on ${recall.count} recalled outcome${recall.count > 1 ? "s" : ""} via ${recall.via})` : ""),
+        }),
+      );
+    }
+  }
 
   if (timer) {
     events = resolveTimer(state, timer.deal, timer.timer);
@@ -735,6 +776,12 @@ export async function tick(prev: BusinessState, opts: TickOptions = {}): Promise
     ];
   }
   // plan.kind === "idle" → no events; company is caught up.
+
+  events = [...preEvents, ...events];
+
+  // Record outcome memories so future decisions can recall them.
+  state.memories = state.memories ?? [];
+  state.memories.push(...memoriesFromEvents(state, events));
 
   // Bookkeeping + live agent status. (ids/counter handled in makeEvent.)
   state.events.push(...events);

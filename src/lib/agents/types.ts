@@ -215,6 +215,24 @@ export interface AgentEvent {
   channel?: OutboundChannel;
 }
 
+// ── Experience memory (MemoryAgent layer) ───────────────────────────────────
+
+/**
+ * One remembered outcome. Text-only in state (replayable, serialisable);
+ * embeddings are a server-side cache keyed by id — never part of state.
+ */
+export interface AgentMemory {
+  id: string;
+  tick: number;
+  agent: AgentId;
+  kind: "outcome" | "compliance";
+  /** Searchable summary, e.g. "retail in Hackney: qualified at £3,200/yr". */
+  text: string;
+  /** Deal traits for cheap prefiltering. */
+  sector: string;
+  borough: string;
+}
+
 // ── Top-level business state ────────────────────────────────────────────────
 
 export interface Finances {
@@ -241,6 +259,8 @@ export interface BusinessState {
   backlog: ProspectBusiness[];
   /** Append-only audit count for the header. */
   decisionsLogged: number;
+  /** Accumulated experience (optional for states saved before this field). */
+  memories?: AgentMemory[];
 }
 
 export interface TickResult {
