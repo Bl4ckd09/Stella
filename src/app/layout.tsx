@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import ConvaiWidget from "@/components/ConvaiWidget";
+import VoxtralVoiceWidget from "@/components/VoxtralVoiceWidget";
 
 export const metadata: Metadata = {
   title: "Stella — Unclaimed Business Money",
@@ -13,7 +13,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         {children}
-        <ConvaiWidget />
+        <VoxtralVoiceWidget />
       </body>
     </html>
   );

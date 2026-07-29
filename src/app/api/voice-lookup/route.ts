@@ -10,6 +10,7 @@
  * secret header on the ElevenLabs tool).
  */
 import { NextRequest, NextResponse } from "next/server";
+import { timingSafeEqual } from "node:crypto";
 import { run, runByName, isPostcode, type BusinessResult } from "@/lib/lookup";
 import { bizProfile } from "@/lib/bizProfile";
 import { boroughContact } from "@/lib/db";
@@ -17,6 +18,13 @@ import { logLookup } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
+
+function secretMatches(expected: string, supplied: string | null): boolean {
+  if (!supplied) return false;
+  const left = Buffer.from(expected);
+  const right = Buffer.from(supplied);
+  return left.length === right.length && timingSafeEqual(left, right);
+}
 
 function gbp(n: number): string {
   return `£${Math.round(n).toLocaleString("en-GB")}`;
@@ -47,9 +55,13 @@ function spokenSummary(biz: BusinessResult, council: { phone?: string | null; em
 
 export async function POST(req: NextRequest) {
   const secret = process.env.VOICE_TOOL_SECRET;
-  if (secret && req.headers.get("x-tool-secret") !== secret) {
+  if (!secret) {
+    return NextResponse.json({ error: "voice_tool_unavailable" }, { status: 503 });
+  }
+  if (!secretMatches(secret, req.headers.get("x-tool-secret"))) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  const isBrowserVoice = req.headers.get("x-voice-channel") === "browser";
 
   const data = await req.json().catch(() => ({}));
   // ElevenLabs sends the tool parameters at the top level.
@@ -85,7 +97,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (!biz) {
-    logLookup({ channel: "phone", query: businessName, postcode });
+    if (!isBrowserVoice) logLookup({ channel: "phone", query: businessName, postcode });
     return NextResponse.json({
       found: false,
       spoken_summary:
@@ -95,7 +107,9 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  logLookup({ channel: "phone", query: businessName, postcode: biz.postcode, uarn: biz.uarn, result: biz });
+  if (!isBrowserVoice) {
+    logLookup({ channel: "phone", query: businessName, postcode: biz.postcode, uarn: biz.uarn, result: biz });
+  }
 
   // Structured fields (for the agent to optionally use) + the spoken summary.
   return NextResponse.json({

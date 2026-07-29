@@ -163,6 +163,7 @@ the same engine and channels power a live web + phone product:
 
 - **Web** (`/`): owner types business name (+ postcode) → relief + grants + a
   streamed, ready-to-send claim letter.
+- **Browser voice**: owner talks to a Voxtral agent through the web widget.
 - **Phone**: owner calls an ElevenLabs voice agent and says their business name →
   the agent reads back exactly what they can claim (figures from the engine).
 
@@ -174,6 +175,7 @@ the same engine and channels power a live web + phone product:
 | Engine | **TypeScript** (`src/lib/engines/`) — parity-tested port of the Python original |
 | Data | **Supabase Postgres** (`pg_trgm` fuzzy name search; 311k VOA + 5.6M Companies House rows) |
 | LLM (prose) | **Claude** by default; any OpenAI-compatible endpoint (Modal/Nebius/…) via the tier seam |
+| Browser voice | **Voxtral** STT and TTS with a tool-calling agent |
 | Phone | **ElevenLabs** Conversational AI + **Twilio** |
 
 ### Local development (full product, with data)
@@ -186,6 +188,7 @@ npm run db:borough                      # 33 London councils
 npm run load:voa                        # 311k VOA properties (data/voa_london_index.csv)
 # Companies House (5.6M) — download + unzip, then:
 # npm run load:companies path/to/BasicCompanyDataAsOneFile-YYYY-MM-DD.csv
+npm run test:voice
 npm run dev
 ```
 
@@ -208,7 +211,9 @@ Fill `.env.local` (and the same vars in Vercel → Settings → Env):
 5. **ElevenLabs / Twilio** (voice): `cd elevenlabs && … ./create-agent.sh` then
    `./provision-twilio.sh`. Set `VOICE_TOOL_SECRET` in both Vercel and the
    ElevenLabs tool header.
-6. **Outbound (optional, live)**: `STELLA_LIVE_OUTBOUND=true` + the channel creds
+6. **Browser voice**: follow `docs/voxtral-voice.md`. Hosted Mistral is the
+   production mode. The self-hosted Modal path remains a non-commercial demo.
+7. **Outbound (optional, live)**: `STELLA_LIVE_OUTBOUND=true` + the channel creds
    (ElevenLabs phone-number id, Wassist, Resend). Sandbox-simulated otherwise.
 
 ## Project layout
@@ -222,6 +227,8 @@ src/lib/             db.ts, lookup.ts, bizProfile.ts, sectors.ts
 src/app/hq/          the Mission Control console
 src/app/api/agents/  tick, dispatch, approve
 src/app/api/         lookup, biz-profile, letter, grant-application, grants, voice-lookup
+src/components/      VoxtralVoiceWidget.tsx
+voice/               gateway, provider clients, checks, and tests
 supabase/migrations/ 0001_init.sql, 0002_rls.sql
 scripts/             load-voa.ts, load-companies.ts, load-boroughs.ts
 elevenlabs/          agent-prompt.md, tool definition, create-agent.sh, provision-twilio.sh
