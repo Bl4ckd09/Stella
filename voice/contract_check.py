@@ -17,7 +17,7 @@ async def check() -> None:
         api_key=os.environ["NEBIUS_API_KEY"],
         stella_url=os.environ.get("STELLA_APP_URL", "https://example.invalid"),
         tool_secret=os.environ.get("VOICE_TOOL_SECRET", "contract-check-only"),
-        model=os.environ.get("NEBIUS_VOICE_MODEL", "Qwen/Qwen3.6-27B"),
+        model=os.environ.get("NEBIUS_VOICE_MODEL", "Qwen/Qwen3-30B-A3B-Instruct-2507"),
     )
     result = await agent.check_contract()
     print(json.dumps(result, indent=2))

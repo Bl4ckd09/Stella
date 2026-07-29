@@ -9,10 +9,19 @@ MODEL = "mistralai/Voxtral-Mini-4B-Realtime-2602"
 
 app = modal.App("stella-voxtral-stt")
 cache = modal.Volume.from_name("stella-voxtral-models", create_if_missing=True)
-image = modal.Image.from_registry("vllm/vllm-openai:v0.24.0").env({
-    "HF_HOME": "/root/.cache/huggingface",
-    "VLLM_DISABLE_COMPILE_CACHE": "1",
-})
+image = (
+    modal.Image.from_registry("vllm/vllm-openai:v0.24.0", add_python="3.12")
+    .entrypoint([])
+    .uv_pip_install(
+        "librosa==0.11.0",
+        "soundfile==0.13.1",
+        "soxr==1.0.0",
+    )
+    .env({
+        "HF_HOME": "/root/.cache/huggingface",
+        "VLLM_DISABLE_COMPILE_CACHE": "1",
+    })
+)
 
 
 @app.function(

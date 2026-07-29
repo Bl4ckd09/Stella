@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-MODEL = "Qwen/Qwen3.6-27B"
+MODEL = "Qwen/Qwen3-30B-A3B-Instruct-2507"
 LOOKUP_TOOL = {
     "type": "function",
     "function": {
