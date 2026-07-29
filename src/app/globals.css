@@ -107,3 +107,25 @@ pre.letter { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, M
 
 .phone-note { margin-top: 28px; font-size: 14px; color: var(--muted); border-top: 1px solid var(--border); padding-top: 18px; }
 .phone-note strong { color: var(--text); }
+
+.voice-widget { position: fixed; right: 22px; bottom: 22px; z-index: 50; display: grid; justify-items: end; gap: 10px; }
+.voice-panel { width: min(360px, calc(100vw - 32px)); padding: 16px; border: 1px solid var(--border); border-radius: 16px; background: rgba(21, 24, 35, 0.98); box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45); }
+.voice-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.voice-panel-head strong { display: block; }
+.voice-state { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+.voice-state.listening { color: var(--green); }
+.voice-state.speaking { color: #a99cff; }
+.voice-state.error { color: var(--red); }
+.voice-close { border: 0; background: transparent; color: var(--muted); font-size: 24px; line-height: 1; cursor: pointer; }
+.voice-transcript { min-height: 54px; margin: 16px 0; color: var(--text); font-size: 14px; line-height: 1.5; }
+.voice-text-form { display: flex; gap: 8px; }
+.voice-text-form input { min-width: 0; padding: 10px 12px; font-size: 13px; }
+.voice-text-form button { border: 0; border-radius: 9px; padding: 0 14px; background: var(--accent); color: white; font-weight: 600; cursor: pointer; }
+.voice-text-form button:disabled { opacity: 0.45; cursor: default; }
+.voice-privacy { margin: 10px 0 0; color: var(--muted); font-size: 11px; }
+.voice-launcher { display: flex; align-items: center; gap: 9px; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 999px; padding: 12px 17px; background: var(--accent); color: white; box-shadow: 0 10px 32px rgba(71, 54, 187, 0.4); font-size: 14px; font-weight: 700; cursor: pointer; }
+.voice-launcher.error { background: #b73a4b; }
+.voice-pulse { width: 10px; height: 10px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.6); }
+.voice-launcher.listening .voice-pulse, .voice-launcher.speaking .voice-pulse { animation: voice-pulse 1.2s infinite; }
+@keyframes voice-pulse { 70% { box-shadow: 0 0 0 8px rgba(255, 255, 255, 0); } 100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); } }
+@media (max-width: 520px) { .voice-widget { right: 16px; bottom: 16px; } }

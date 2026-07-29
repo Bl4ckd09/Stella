@@ -2,7 +2,7 @@
   "name": "stella",
   "version": "0.1.0",
   "private": true,
-  "description": "Stella — Unclaimed Business Money Engine (cloud rebuild: Supabase + Vercel + ElevenLabs)",
+  "description": "Stella: Unclaimed Business Money Engine",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -11,7 +11,13 @@
     "test:watch": "vitest",
     "load:voa": "tsx scripts/load-voa.ts",
     "load:companies": "tsx scripts/load-companies.ts",
-    "db:borough": "tsx scripts/load-boroughs.ts"
+    "db:borough": "tsx scripts/load-boroughs.ts",
+    "test:voice": "PYTHONPATH=. .venv/bin/python -m pytest -c voice/pytest.ini voice/tests",
+    "voice:contract": "PYTHONPATH=. .venv/bin/python voice/contract_check.py",
+    "voice:prewarm": "node scripts/prewarm-voice.mjs",
+    "voice:smoke": "PYTHONPATH=. .venv/bin/python voice/smoke_deployed.py",
+    "voice:latency": "PYTHONPATH=. .venv/bin/python voice/latency_check.py",
+    "voice:deploy": "npm run voice:contract && modal deploy voice/modal_stt.py && modal deploy voice/modal_tts.py && modal deploy voice/modal_gateway.py"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.69.0",

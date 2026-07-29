@@ -1,0 +1,1 @@
+"""Voxtral gateway package."""
