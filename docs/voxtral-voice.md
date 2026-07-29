@@ -19,7 +19,7 @@ The browser path replaces the ElevenLabs web widget. The phone path does not cha
 | STT | `mistralai/Voxtral-Mini-4B-Realtime-2602` |
 | Turn end | WebRTC VAD after 600 ms of silence |
 | Maximum turn | 15 seconds |
-| Agent | Nebius `Qwen/Qwen3.6-27B` with `lookup_business` |
+| Agent | Nebius `Qwen/Qwen3-30B-A3B-Instruct-2507` with `lookup_business` |
 | TTS | `mistralai/Voxtral-4B-TTS-2603`, voice `casual_female` |
 | Output | Streamed mono PCM16 at 24 kHz |
 | Scale policy | Zero warm containers and a 20 minute idle window |
@@ -41,7 +41,7 @@ VOICE_SESSION_SECRET
 VOICE_TOOL_SECRET
 STELLA_APP_URL
 NEBIUS_API_KEY
-NEBIUS_VOICE_MODEL=Qwen/Qwen3.6-27B
+NEBIUS_VOICE_MODEL=Qwen/Qwen3-30B-A3B-Instruct-2507
 VOXTRAL_STT_URL
 VOXTRAL_TTS_URL
 VOXTRAL_VOICE=casual_female

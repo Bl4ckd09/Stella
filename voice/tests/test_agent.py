@@ -40,7 +40,7 @@ async def test_tool_summary_bypasses_llm_edits() -> None:
 async def test_model_and_tool_contract() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         if request.method == "GET":
-            return httpx.Response(200, json={"data": [{"id": "Qwen/Qwen3.6-27B"}]})
+            return httpx.Response(200, json={"data": [{"id": "Qwen/Qwen3-30B-A3B-Instruct-2507"}]})
         body = json.loads(request.content)
         assert body["tools"] == [LOOKUP_TOOL]
         return httpx.Response(200, json={

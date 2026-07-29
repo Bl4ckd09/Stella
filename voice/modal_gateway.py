@@ -16,11 +16,12 @@ image = (
     .add_local_python_source("voice")
 )
 voice_secret = modal.Secret.from_name("stella-voice")
+runtime_secret = modal.Secret.from_name("stella-voice-runtime")
 
 
 @app.function(
     image=image,
-    secrets=[voice_secret],
+    secrets=[voice_secret, runtime_secret],
     min_containers=0,
     scaledown_window=20 * 60,
     timeout=60 * 60,
@@ -45,7 +46,7 @@ def gateway():
             api_key=os.environ["NEBIUS_API_KEY"],
             stella_url=stella_url,
             tool_secret=os.environ["VOICE_TOOL_SECRET"],
-            model=os.environ.get("NEBIUS_VOICE_MODEL", "Qwen/Qwen3.6-27B"),
+            model=os.environ.get("NEBIUS_VOICE_MODEL", "Qwen/Qwen3-30B-A3B-Instruct-2507"),
         ),
         synthesizer=VoxtralSynthesizer(
             os.environ["VOXTRAL_TTS_URL"],
