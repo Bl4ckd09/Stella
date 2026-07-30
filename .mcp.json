@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "stella": {
+      "command": "npx",
+      "args": ["tsx", "scripts/mcp-server.ts"]
+    }
+  }
+}

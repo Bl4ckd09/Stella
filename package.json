@@ -9,12 +9,15 @@
     "start": "next start",
     "test": "vitest run",
     "test:watch": "vitest",
+    "mcp": "tsx scripts/mcp-server.ts",
+    "cycle": "bash scripts/headless-cycle.sh",
     "load:voa": "tsx scripts/load-voa.ts",
     "load:companies": "tsx scripts/load-companies.ts",
     "db:borough": "tsx scripts/load-boroughs.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.69.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@supabase/supabase-js": "^2.45.0",
     "next": "^15.0.0",
     "pg": "^8.13.0",
