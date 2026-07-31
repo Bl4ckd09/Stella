@@ -11,7 +11,16 @@ logger = logging.getLogger("stella.voice.metrics")
 class StructuredMetrics:
     """Log timing and tool outcomes. Never accept audio or text fields."""
 
-    allowed_fields = {"event", "session", "timings_ms", "tool", "outcome", "reason"}
+    allowed_fields = {
+        "event",
+        "session",
+        "timings_ms",
+        "tool",
+        "outcome",
+        "reason",
+        "provider",
+        "runtime_mode",
+    }
 
     def record(self, session_id: str, event: str, **fields: Any) -> None:
         record: dict[str, Any] = {

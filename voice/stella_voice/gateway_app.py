@@ -2,17 +2,21 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import json
 import time
 from collections.abc import AsyncIterator
-from typing import Callable
+from typing import Awaitable, Callable
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from .metrics import StructuredMetrics
 from .services import GatewayServices
-from .tokens import ReplayGuard, TokenError, verify_token
+from .tokens import ReplayGuard, TokenClaims, TokenError, verify_token
 from .vad import TurnDetector, VadConfig
+
+AUDIO_QUEUE_MAX_FRAMES = 250
+ReplayConsumer = Callable[[TokenClaims, int], bool | Awaitable[bool]]
 
 
 async def queue_frames(queue: asyncio.Queue[bytes | None]) -> AsyncIterator[bytes]:
@@ -23,6 +27,13 @@ async def queue_frames(queue: asyncio.Queue[bytes | None]) -> AsyncIterator[byte
         yield frame
 
 
+def close_audio_queue(queue: asyncio.Queue[bytes | None]) -> None:
+    while queue.full():
+        with contextlib.suppress(asyncio.QueueEmpty):
+            queue.get_nowait()
+    queue.put_nowait(None)
+
+
 def create_voice_app(
     services: GatewayServices,
     session_secret: str,
@@ -30,16 +41,18 @@ def create_voice_app(
     metrics: StructuredMetrics | None = None,
     classifier: Callable[[bytes, int], bool] | None = None,
     now: Callable[[], int] | None = None,
+    replay_consumer: ReplayConsumer | None = None,
 ) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     metric_sink = metrics or StructuredMetrics()
     replay_guard = ReplayGuard()
+    consume_replay = replay_consumer or replay_guard.consume
     clock = now or (lambda: int(time.time()))
     expected_origin = allowed_origin.rstrip("/") if allowed_origin else None
 
     @app.get("/health")
     async def health() -> dict[str, str]:
-        return {"status": "ok"}
+        return {"status": "ok", "runtime_mode": services.runtime_mode, "provider": services.provider}
 
     @app.websocket("/ws")
     async def voice_socket(websocket: WebSocket) -> None:
@@ -51,13 +64,25 @@ def create_voice_app(
         except TokenError:
             await websocket.close(code=4401, reason="invalid_token")
             return
-        if not replay_guard.consume(claims, now=clock()):
+        try:
+            consumed = consume_replay(claims, clock())
+            if inspect.isawaitable(consumed):
+                consumed = await consumed
+        except Exception:
+            await websocket.close(code=1013, reason="security_unavailable")
+            return
+        if not consumed:
             await websocket.close(code=4409, reason="token_reused")
             return
 
         await websocket.accept()
         session_id = claims.jti
-        metric_sink.record(session_id, "connected")
+        metric_sink.record(
+            session_id,
+            "connected",
+            runtime_mode=services.runtime_mode,
+            provider=services.provider,
+        )
         send_lock = asyncio.Lock()
         detector = TurnDetector(VadConfig(), classifier=classifier) if classifier else TurnDetector(VadConfig())
         history: list[dict[str, str]] = []
@@ -72,7 +97,7 @@ def create_voice_app(
         async def cancel_current(reason: str) -> None:
             nonlocal current_task, audio_queue, active_timing
             if audio_queue:
-                await audio_queue.put(None)
+                close_audio_queue(audio_queue)
                 audio_queue = None
                 active_timing = None
             if not current_task or current_task.done():
@@ -149,7 +174,12 @@ def create_voice_app(
                 timings_ms={"final": round((time.perf_counter() - turn_started) * 1000, 2)},
             )
             if not transcript:
-                await send_json({"type": "error", "message": "I did not hear that. Please try again."})
+                await send_json({
+                    "type": "error",
+                    "code": "empty_transcript",
+                    "message": "I did not hear that. Please try again.",
+                    "recoverable": True,
+                })
                 await send_json({"type": "turn_end"})
                 return
             await send_json({"type": "transcript_final", "text": transcript})
@@ -163,7 +193,12 @@ def create_voice_app(
             except Exception:
                 metric_sink.record(session_id, "turn_error", outcome="service_error")
                 with contextlib.suppress(Exception):
-                    await send_json({"type": "error", "message": "Voice is unavailable. Please try again."})
+                    await send_json({
+                        "type": "error",
+                        "code": "service_error",
+                        "message": "Voice is unavailable. Please try again.",
+                        "recoverable": False,
+                    })
 
         await send_json({
             "type": "ready",
@@ -180,12 +215,17 @@ def create_voice_app(
                     try:
                         update = detector.push(message["bytes"])
                     except ValueError:
-                        await send_json({"type": "error", "message": "The audio frame was invalid."})
+                        await send_json({
+                            "type": "error",
+                            "code": "invalid_audio",
+                            "message": "The audio frame was invalid.",
+                            "recoverable": True,
+                        })
                         continue
                     if update.started:
                         await cancel_current("user_speech")
                         await send_json({"type": "speech_started"})
-                        audio_queue = asyncio.Queue()
+                        audio_queue = asyncio.Queue(maxsize=AUDIO_QUEUE_MAX_FRAMES)
                         for frame in update.audio_frames:
                             await audio_queue.put(frame)
                         started_at = time.perf_counter()
@@ -199,7 +239,7 @@ def create_voice_app(
                     if update.ended and audio_queue:
                         if active_timing is not None:
                             active_timing["ended"] = time.perf_counter()
-                        await audio_queue.put(None)
+                        close_audio_queue(audio_queue)
                         audio_queue = None
                         await send_json({"type": "speech_ended", "reason": update.reason or "silence"})
                     continue
@@ -210,7 +250,12 @@ def create_voice_app(
                 try:
                     event = json.loads(raw_text)
                 except json.JSONDecodeError:
-                    await send_json({"type": "error", "message": "The message was invalid."})
+                    await send_json({
+                        "type": "error",
+                        "code": "invalid_message",
+                        "message": "The message was invalid.",
+                        "recoverable": True,
+                    })
                     continue
                 if event.get("type") == "ping":
                     await send_json({"type": "pong"})
@@ -229,7 +274,7 @@ def create_voice_app(
             pass
         finally:
             if audio_queue:
-                await audio_queue.put(None)
+                close_audio_queue(audio_queue)
             if current_task and not current_task.done():
                 current_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):

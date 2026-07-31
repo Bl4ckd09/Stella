@@ -1,5 +1,6 @@
 fastapi==0.116.1
 httpx==0.28.1
+mistralai[realtime]==2.4.5
 pytest==8.4.1
 pytest-asyncio==1.1.0
 python-dotenv==1.1.1

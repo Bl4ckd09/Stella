@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 
-from voice.stella_voice.agent import LOOKUP_TOOL, NebiusAgent
+from voice.stella_voice.agent import LOOKUP_TOOL, MistralAgent, NebiusAgent
 
 SUMMARY = "Engine exact summary: £4,990 per year."
 
@@ -52,3 +52,23 @@ async def test_model_and_tool_contract() -> None:
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     agent = NebiusAgent("key", "https://stella.test", "secret", client=client)
     assert (await agent.check_contract())["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_mistral_agent_retries_one_safe_provider_failure() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        if request.url.path.endswith("/chat/completions"):
+            attempts += 1
+            if attempts == 1:
+                return httpx.Response(503)
+            return httpx.Response(200, json={"choices": [{"message": {"content": "Tell me your business name."}}]})
+        raise AssertionError("unexpected request")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    agent = MistralAgent("key", "https://stella.test", "secret", client=client)
+    reply = await agent.respond("Hello", [])
+    assert reply.text == "Tell me your business name."
+    assert attempts == 2

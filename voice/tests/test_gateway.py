@@ -92,6 +92,9 @@ def test_complete_mocked_websocket_audio_turn() -> None:
     assert "audio_bytes" in types
     assert next(event["text"] for event in events if event["type"] == "reply_text") == SUMMARY
     assert all("text" not in record and "transcript" not in record and "audio" not in record for record in metrics.records)
+    connected = next(record for record in metrics.records if record["event"] == "connected")
+    assert connected["runtime_mode"] == "self_hosted"
+    assert connected["provider"] == "modal_nebius"
 
 
 def test_interruption_cancels_playback_within_250ms() -> None:

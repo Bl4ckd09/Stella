@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeGatewayUrl, pcm16ToFloat32 } from "../src/lib/voiceAudio";
+import { normalizeGatewayUrl, pcm16ToFloat32, shouldResetPlaybackQueue } from "../src/lib/voiceAudio";
 
 describe("browser voice audio", () => {
   it("normalizes secure gateway URLs", () => {
@@ -11,5 +11,10 @@ describe("browser voice audio", () => {
   it("converts signed PCM16 without clipping", () => {
     const pcm = new Int16Array([-32768, 0, 32767]);
     expect(Array.from(pcm16ToFloat32(pcm.buffer))).toEqual([-1, 0, 1]);
+  });
+
+  it("resets an excessive playback queue", () => {
+    expect(shouldResetPlaybackQueue(10, 14.1)).toBe(true);
+    expect(shouldResetPlaybackQueue(10, 14)).toBe(false);
   });
 });

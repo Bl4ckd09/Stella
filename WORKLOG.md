@@ -10,3 +10,13 @@
 - Replaced the unavailable Qwen 3.6 model ID with the live Qwen 3 30B instruct model after its Nebius tool contract passed.
 - Fixed the Modal image entrypoints, STT audio packages, TTS memory limits, and split runtime secrets.
 - Modal stopped the live GPU test after the Starter workspace used its free credit. A payment method is required to resume it.
+
+## 2026-07-31
+
+- Replayed the Voxtral work onto the current `autonomous-agents` default branch.
+- Added a hosted Mistral production mode for realtime STT, Mistral Small, and Voxtral TTS.
+- Kept the self-hosted Modal and Nebius mode as a non-commercial demo.
+- Added shared Supabase rate limits and atomic single-use session redemption.
+- Fixed browser cleanup, retry, focus, error, privacy, and playback queue behaviour.
+- Added provider tests, evidence output, deployment checks, and a public case study.
+- Kept live performance claims blocked until a credits-only run produces evidence.

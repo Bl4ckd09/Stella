@@ -1,5 +1,6 @@
 export const INPUT_SAMPLE_RATE = 16_000;
 export const OUTPUT_SAMPLE_RATE = 24_000;
+export const MAX_QUEUED_AUDIO_SECONDS = 4;
 
 export function normalizeGatewayUrl(url: string): string {
   const parsed = new URL(url);
@@ -18,4 +19,12 @@ export function pcm16ToFloat32(bytes: ArrayBuffer): Float32Array {
     output[i] = input[i] < 0 ? input[i] / 32768 : input[i] / 32767;
   }
   return output;
+}
+
+export function shouldResetPlaybackQueue(
+  currentTime: number,
+  nextAudioTime: number,
+  maximumSeconds = MAX_QUEUED_AUDIO_SECONDS,
+): boolean {
+  return nextAudioTime - currentTime > maximumSeconds;
 }

@@ -1,7 +1,12 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { normalizeGatewayUrl, OUTPUT_SAMPLE_RATE, pcm16ToFloat32 } from "@/lib/voiceAudio";
+import {
+  normalizeGatewayUrl,
+  OUTPUT_SAMPLE_RATE,
+  pcm16ToFloat32,
+  shouldResetPlaybackQueue,
+} from "@/lib/voiceAudio";
 
 type VoiceState = "idle" | "connecting" | "listening" | "thinking" | "speaking" | "error";
 
@@ -15,6 +20,7 @@ interface GatewayEvent {
   text?: string;
   message?: string;
   sample_rate?: number;
+  recoverable?: boolean;
 }
 
 const labels: Record<VoiceState, string> = {
@@ -33,13 +39,24 @@ export default function VoxtralVoiceWidget() {
   const [reply, setReply] = useState("Ask Stella what your business can claim.");
   const [text, setText] = useState("");
 
+  const stateRef = useRef<VoiceState>("idle");
   const socketRef = useRef<WebSocket | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const mediaSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const workletRef = useRef<AudioWorkletNode | null>(null);
   const muteRef = useRef<GainNode | null>(null);
   const sourcesRef = useRef(new Set<AudioBufferSourceNode>());
   const nextAudioTimeRef = useRef(0);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const launcherRef = useRef<HTMLButtonElement | null>(null);
+
+  function transition(next: VoiceState) {
+    stateRef.current = next;
+    setState(next);
+  }
 
   function stopPlayback() {
     for (const source of sourcesRef.current) {
@@ -53,29 +70,63 @@ export default function VoxtralVoiceWidget() {
     nextAudioTimeRef.current = audioContextRef.current?.currentTime ?? 0;
   }
 
-  async function stopSession() {
-    socketRef.current?.close(1000, "client_closed");
+  async function cleanupResources(closeSocket = true) {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    const socket = socketRef.current;
     socketRef.current = null;
+    if (closeSocket && socket && socket.readyState < WebSocket.CLOSING) {
+      socket.close(1000, "client_closed");
+    }
+    if (workletRef.current) workletRef.current.port.onmessage = null;
+    mediaSourceRef.current?.disconnect();
     workletRef.current?.disconnect();
     muteRef.current?.disconnect();
+    mediaSourceRef.current = null;
     workletRef.current = null;
     muteRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     stopPlayback();
-    if (audioContextRef.current) await audioContextRef.current.close().catch(() => undefined);
+    const context = audioContextRef.current;
     audioContextRef.current = null;
+    if (context && context.state !== "closed") await context.close().catch(() => undefined);
+  }
+
+  async function stopSession() {
+    transition("idle");
     setPartial("");
-    setState("idle");
+    await cleanupResources();
+  }
+
+  async function failSession(message: string) {
+    setReply(message);
+    setPartial("");
+    transition("error");
+    await cleanupResources();
   }
 
   useEffect(() => () => {
-    void stopSession();
+    void cleanupResources();
   }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    panelRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      void stopSession();
+      launcherRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open]);
 
   function playPcm(bytes: ArrayBuffer, sampleRate = OUTPUT_SAMPLE_RATE) {
     const context = audioContextRef.current;
     if (!context || !bytes.byteLength) return;
+    if (shouldResetPlaybackQueue(context.currentTime, nextAudioTimeRef.current)) stopPlayback();
     const samples = pcm16ToFloat32(bytes);
     const buffer = context.createBuffer(1, samples.length, sampleRate);
     buffer.getChannelData(0).set(samples);
@@ -89,39 +140,45 @@ export default function VoxtralVoiceWidget() {
     source.onended = () => sourcesRef.current.delete(source);
   }
 
-  function handleGatewayEvent(event: GatewayEvent) {
+  async function handleGatewayEvent(event: GatewayEvent) {
     switch (event.type) {
       case "ready":
       case "turn_end":
-        setState("listening");
+        transition("listening");
+        inputRef.current?.focus();
         break;
       case "speech_started":
         setPartial("");
-        setState("listening");
+        transition("listening");
         break;
       case "transcript_partial":
       case "transcript_final":
         setPartial(event.text || "");
-        if (event.type === "transcript_final") setState("thinking");
+        if (event.type === "transcript_final") transition("thinking");
         break;
       case "reply_text":
         setReply(event.text || "");
-        setState("thinking");
+        transition("thinking");
         break;
       case "audio_start":
         stopPlayback();
-        setState("speaking");
+        transition("speaking");
         break;
       case "audio_end":
-        setState("listening");
+        transition("listening");
         break;
       case "playback_cancel":
         stopPlayback();
-        setState("listening");
+        transition("listening");
         break;
       case "error":
-        setReply(event.message || "Voice is unavailable. Use the text box or try again.");
-        setState("error");
+        if (event.recoverable) {
+          setReply(event.message || "Please try again.");
+          setPartial("");
+          transition("listening");
+        } else {
+          await failSession(event.message || "Voice is unavailable. Try again.");
+        }
         break;
     }
   }
@@ -131,8 +188,13 @@ export default function VoxtralVoiceWidget() {
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
+    if (socketRef.current !== socket || audioContextRef.current !== context) {
+      stream.getTracks().forEach((track) => track.stop());
+      return;
+    }
     streamRef.current = stream;
     const source = context.createMediaStreamSource(stream);
+    mediaSourceRef.current = source;
     const worklet = new AudioWorkletNode(context, "stella-pcm-processor", {
       processorOptions: { targetSampleRate: 16_000 },
     });
@@ -142,25 +204,29 @@ export default function VoxtralVoiceWidget() {
     worklet.connect(mute);
     mute.connect(context.destination);
     worklet.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
-      if (socket.readyState === WebSocket.OPEN) socket.send(event.data);
+      if (socketRef.current === socket && socket.readyState === WebSocket.OPEN) socket.send(event.data);
     };
     workletRef.current = worklet;
     muteRef.current = mute;
   }
 
   async function startSession() {
-    if (state !== "idle" && state !== "error") return;
+    if (stateRef.current !== "idle" && stateRef.current !== "error") return;
+    await cleanupResources();
     setOpen(true);
-    setState("connecting");
-    setReply("Connecting to Stella…");
+    transition("connecting");
+    setReply("Connecting to Stella...");
     setPartial("");
+    const abort = new AbortController();
+    abortRef.current = abort;
     try {
       const context = new AudioContext();
       audioContextRef.current = context;
       await context.resume();
-      const response = await fetch("/api/voice/session", { method: "POST" });
+      const response = await fetch("/api/voice/session", { method: "POST", signal: abort.signal });
       if (!response.ok) throw new Error("Voice session could not start");
-      const session = (await response.json()) as SessionResponse;
+      const session = await response.json() as SessionResponse;
+      if (abort.signal.aborted) return;
       const endpoint = new URL(normalizeGatewayUrl(session.gateway_url));
       if (endpoint.pathname === "/") endpoint.pathname = "/ws";
       endpoint.searchParams.set("token", session.token);
@@ -169,37 +235,39 @@ export default function VoxtralVoiceWidget() {
       socket.binaryType = "arraybuffer";
       socketRef.current = socket;
       socket.onopen = async () => {
+        if (socketRef.current !== socket) return;
         try {
           await startMicrophone(socket, context);
         } catch {
-          setReply("Microphone access is off. You can still use the text box.");
-          setState("listening");
+          setReply("Microphone access is off. Use the text box instead.");
+          transition("listening");
+          inputRef.current?.focus();
         }
       };
       socket.onmessage = (event) => {
+        if (socketRef.current !== socket) return;
         if (event.data instanceof ArrayBuffer) {
           playPcm(event.data);
           return;
         }
         try {
-          handleGatewayEvent(JSON.parse(String(event.data)) as GatewayEvent);
+          void handleGatewayEvent(JSON.parse(String(event.data)) as GatewayEvent);
         } catch {
-          setReply("The voice gateway sent an invalid response.");
-          setState("error");
+          void failSession("The voice gateway sent an invalid response.");
         }
       };
       socket.onerror = () => {
-        setReply("The voice connection failed. Try again.");
-        setState("error");
+        if (socketRef.current === socket) void failSession("The voice connection failed. Try again.");
       };
       socket.onclose = () => {
-        socketRef.current = null;
-        if (state !== "idle") setState("idle");
+        if (socketRef.current !== socket) return;
+        void cleanupResources(false).then(() => {
+          if (stateRef.current !== "error") transition("idle");
+        });
       };
-    } catch {
-      await stopSession();
-      setReply("Voice is unavailable. Try again or use the main form.");
-      setState("error");
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      await failSession("Voice is unavailable. Try again or use the main form.");
     }
   }
 
@@ -212,32 +280,65 @@ export default function VoxtralVoiceWidget() {
     socket.send(JSON.stringify({ type: "text_input", text: value }));
     setPartial(value);
     setText("");
-    setState("thinking");
+    transition("thinking");
   }
+
+  function closePanel() {
+    setOpen(false);
+    void stopSession();
+    launcherRef.current?.focus();
+  }
+
+  const sessionActive = state !== "idle" && state !== "error";
+  const canSend = sessionActive && state !== "connecting" && socketRef.current?.readyState === WebSocket.OPEN;
 
   return (
     <aside className={`voice-widget ${open ? "open" : ""}`} aria-label="Stella voice assistant">
       {open && (
-        <div className="voice-panel">
+        <div
+          id="voice-panel"
+          ref={panelRef}
+          className="voice-panel"
+          role="dialog"
+          aria-modal="false"
+          aria-labelledby="voice-panel-title"
+          aria-describedby="voice-panel-message voice-panel-privacy"
+          tabIndex={-1}
+        >
           <div className="voice-panel-head">
             <div>
-              <strong>Talk to Stella</strong>
-              <span className={`voice-state ${state}`}>{labels[state]}</span>
+              <strong id="voice-panel-title">Talk to Stella</strong>
+              <span className={`voice-state ${state}`} aria-live="polite">{labels[state]}</span>
             </div>
-            <button className="voice-close" aria-label="Close voice assistant" onClick={() => { setOpen(false); void stopSession(); }}>×</button>
+            <button className="voice-close" aria-label="Close voice assistant" onClick={closePanel}>×</button>
           </div>
-          <p className="voice-transcript">{partial || reply}</p>
-          <form className="voice-text-form" onSubmit={submitText}>
-            <input value={text} onChange={(event) => setText(event.target.value)} placeholder="Or type your business and postcode" aria-label="Message Stella" />
-            <button type="submit" disabled={!text.trim() || !socketRef.current}>Send</button>
-          </form>
-          <p className="voice-privacy">Audio and transcripts are not stored.</p>
+          <p id="voice-panel-message" className="voice-transcript" aria-live="polite">
+            {partial || reply}
+          </p>
+          {state !== "error" && (
+            <form className="voice-text-form" onSubmit={submitText}>
+              <input
+                ref={inputRef}
+                value={text}
+                onChange={(event) => setText(event.target.value)}
+                placeholder="Or type your business and postcode"
+                aria-label="Message Stella"
+                disabled={!canSend}
+              />
+              <button type="submit" disabled={!text.trim() || !canSend}>Send</button>
+            </form>
+          )}
+          <p id="voice-panel-privacy" className="voice-privacy">
+            Stella does not save audio or transcripts. Voice providers process them during this session.
+          </p>
         </div>
       )}
       <button
+        ref={launcherRef}
         className={`voice-launcher ${state}`}
-        onClick={open && state !== "idle" && state !== "error" ? () => void stopSession() : startSession}
+        onClick={sessionActive ? () => void stopSession() : () => void startSession()}
         aria-expanded={open}
+        aria-controls="voice-panel"
       >
         <span className="voice-pulse" aria-hidden="true" />
         {open ? labels[state] : "Talk to Stella"}

@@ -2,11 +2,14 @@ import dotenv from "dotenv";
 
 dotenv.config({ path: ".env.local" });
 
-const targets = [
-  ["stt", process.env.VOXTRAL_STT_URL, "/v1/models", true],
-  ["tts", process.env.VOXTRAL_TTS_URL, "/v1/models", true],
-  ["gateway", process.env.VOXTRAL_GATEWAY_URL, "/health", false],
-];
+const runtimeMode = process.env.VOICE_RUNTIME_MODE || "mistral_api";
+const targets = [["gateway", process.env.VOXTRAL_GATEWAY_URL, "/health", false]];
+if (runtimeMode === "self_hosted") {
+  targets.unshift(
+    ["stt", process.env.VOXTRAL_STT_URL, "/v1/models", true],
+    ["tts", process.env.VOXTRAL_TTS_URL, "/v1/models", true],
+  );
+}
 
 const proxyHeaders = process.env.MODAL_PROXY_KEY && process.env.MODAL_PROXY_SECRET
   ? { "Modal-Key": process.env.MODAL_PROXY_KEY, "Modal-Secret": process.env.MODAL_PROXY_SECRET }

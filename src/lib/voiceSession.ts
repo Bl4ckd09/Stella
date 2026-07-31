@@ -27,7 +27,7 @@ export function issueVoiceToken(
   secret: string,
   nowSeconds = Math.floor(Date.now() / 1000),
   ttlSeconds = VOICE_TOKEN_TTL_SECONDS,
-  tokenId = randomUUID(),
+  tokenId: string = randomUUID(),
 ): { token: string; claims: VoiceTokenClaims } {
   if (secret.length < 32) throw new Error("VOICE_SESSION_SECRET must contain at least 32 characters");
   if (ttlSeconds < 30 || ttlSeconds > 300) throw new Error("Voice token TTL must be between 30 and 300 seconds");

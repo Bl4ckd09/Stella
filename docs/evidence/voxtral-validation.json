@@ -1,0 +1,26 @@
+{
+  "generated_at": "2026-07-31T17:10:37Z",
+  "branch": "voxtral-hosted",
+  "base_commit": "765e7b3c2309b457bc354b93f8333d9ff24963d3",
+  "runtime_mode": "mistral_api",
+  "local": {
+    "typescript_tests": { "status": "passed", "count": 1504 },
+    "python_voice_tests": { "status": "passed", "count": 15 },
+    "typescript_check": "passed",
+    "production_build": "passed",
+    "desktop_ui": "passed",
+    "mobile_ui_390x844": "passed",
+    "browser_console": "passed"
+  },
+  "live": {
+    "status": "credit_blocked",
+    "reason": "No Mistral credentials are configured, and no card charge is authorised.",
+    "modal_containers": "stopped",
+    "partial_p95_ms": null,
+    "first_audio_p95_ms": null,
+    "interruption_ms": null
+  },
+  "claims": {
+    "measured_latency_published": false
+  }
+}
