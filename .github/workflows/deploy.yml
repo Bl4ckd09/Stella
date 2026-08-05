@@ -1,0 +1,66 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - autonomous-agents
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vercel-production
+  cancel-in-progress: false
+
+jobs:
+  production:
+    name: Vercel production
+    if: >-
+      vars.VERCEL_DEPLOY_ENABLED == 'true' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.url }}
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+
+    steps:
+      - name: Check out verified commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.16.0"
+          cache: npm
+
+      - name: Check deployment settings
+        run: |
+          test -n "$VERCEL_TOKEN" || { echo "VERCEL_TOKEN is missing"; exit 1; }
+          test -n "$VERCEL_ORG_ID" || { echo "VERCEL_ORG_ID is missing"; exit 1; }
+          test -n "$VERCEL_PROJECT_ID" || { echo "VERCEL_PROJECT_ID is missing"; exit 1; }
+
+      - name: Pull Vercel settings
+        run: npx --yes vercel@54.14.2 pull --yes --environment=production --token "$VERCEL_TOKEN"
+
+      - name: Build Vercel application
+        run: npx --yes vercel@54.14.2 build --prod --token "$VERCEL_TOKEN"
+
+      - name: Deploy Vercel application
+        id: deploy
+        run: |
+          deployment_output="$(npx --yes vercel@54.14.2 deploy --prebuilt --prod --token "$VERCEL_TOKEN")"
+          deployment_url="$(printf '%s\n' "$deployment_output" | tail -n 1)"
+          test -n "$deployment_url"
+          echo "url=$deployment_url" >> "$GITHUB_OUTPUT"
+          echo "$deployment_url"

@@ -20,3 +20,10 @@
 - Fixed browser cleanup, retry, focus, error, privacy, and playback queue behaviour.
 - Added provider tests, evidence output, deployment checks, and a public case study.
 - Kept live performance claims blocked until a credits-only run produces evidence.
+
+## 2026-08-05
+
+- Added GitHub Actions CI for TypeScript tests, Python voice tests, type checks, and production builds.
+- Added a Vercel production workflow that runs only after successful default-branch CI.
+- Created the GitHub `production` environment and set `VERCEL_DEPLOY_ENABLED=false`.
+- Kept Modal outside CI and kept Vercel deployment disabled until credentials exist.
