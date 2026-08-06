@@ -31,6 +31,8 @@ The agent never changes a deterministic tool result.
 
 The Next.js route creates a short-lived HMAC token. It registers only an HMAC hash of the token ID.
 The Modal gateway redeems that hash through an atomic Supabase function. A second redemption fails.
+The browser sends the token in the first WebSocket frame. Request URLs never contain the token.
+The gateway closes any connection that does not authenticate within three seconds.
 
 The rate limiter also uses an atomic Supabase function. It stores only an HMAC hash of the client address.
 Set `VOICE_SECURITY_MODE=memory` only for local tests. Production fails closed without Supabase.
@@ -65,6 +67,7 @@ Run `supabase/migrations/0005_voice_security.sql`. Add these values to Vercel.
 VOICE_SESSION_SECRET
 VOICE_TOOL_SECRET
 VOXTRAL_GATEWAY_URL
+STELLA_APP_URL
 VOICE_SECURITY_MODE=supabase
 NEXT_PUBLIC_SUPABASE_URL
 SUPABASE_SERVICE_ROLE_KEY
@@ -74,7 +77,7 @@ Install the tools. Check the hosted model and tool contracts. Deploy only the CP
 
 ```bash
 python3 -m venv .venv
-.venv/bin/python -m pip install -r voice/requirements-dev.txt
+.venv/bin/python -m pip install --require-hashes -r voice/requirements-lock.txt
 npm install
 npm run voice:contract
 npm run voice:deploy

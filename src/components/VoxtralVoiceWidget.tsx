@@ -229,29 +229,33 @@ export default function VoxtralVoiceWidget() {
       if (abort.signal.aborted) return;
       const endpoint = new URL(normalizeGatewayUrl(session.gateway_url));
       if (endpoint.pathname === "/") endpoint.pathname = "/ws";
-      endpoint.searchParams.set("token", session.token);
+      endpoint.searchParams.delete("token");
+      let sessionToken = session.token;
 
       const socket = new WebSocket(endpoint);
       socket.binaryType = "arraybuffer";
       socketRef.current = socket;
       socket.onopen = async () => {
         if (socketRef.current !== socket) return;
-        try {
-          await startMicrophone(socket, context);
-        } catch {
-          setReply("Microphone access is off. Use the text box instead.");
-          transition("listening");
-          inputRef.current?.focus();
-        }
+        socket.send(JSON.stringify({ type: "auth", token: sessionToken }));
+        sessionToken = "";
       };
-      socket.onmessage = (event) => {
+      socket.onmessage = async (event) => {
         if (socketRef.current !== socket) return;
         if (event.data instanceof ArrayBuffer) {
           playPcm(event.data);
           return;
         }
         try {
-          void handleGatewayEvent(JSON.parse(String(event.data)) as GatewayEvent);
+          const gatewayEvent = JSON.parse(String(event.data)) as GatewayEvent;
+          if (gatewayEvent.type === "ready") {
+            try {
+              await startMicrophone(socket, context);
+            } catch {
+              setReply("Microphone access is off. Use the text box instead.");
+            }
+          }
+          await handleGatewayEvent(gatewayEvent);
         } catch {
           void failSession("The voice gateway sent an invalid response.");
         }

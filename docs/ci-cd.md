@@ -4,7 +4,7 @@
 
 The `CI` workflow runs for each pull request and each push to `autonomous-agents`.
 It installs locked Node.js packages and pinned Python packages.
-It runs all tests, the TypeScript check, and the production build.
+It audits both dependency sets. It runs all tests, the TypeScript check, and the production build.
 
 The `Deploy` workflow targets Vercel production after successful default-branch CI.
 The repository variable `VERCEL_DEPLOY_ENABLED` controls this job.

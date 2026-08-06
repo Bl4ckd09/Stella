@@ -5,7 +5,9 @@ import json
 import time
 from collections.abc import AsyncIterator
 
+import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from voice.stella_voice.agent import AgentReply
 from voice.stella_voice.gateway_app import create_voice_app
@@ -67,6 +69,11 @@ def receive_until(socket, terminal: str) -> list[dict]:
             events.append({"type": "audio_bytes", "length": len(message["bytes"])})
 
 
+def authenticate(socket, jti: str) -> None:
+    socket.send_json({"type": "auth", "token": token(jti)})
+    assert socket.receive_json()["type"] == "ready"
+
+
 def test_complete_mocked_websocket_audio_turn() -> None:
     metrics = MemoryMetrics()
     app = create_voice_app(
@@ -78,8 +85,8 @@ def test_complete_mocked_websocket_audio_turn() -> None:
     )
     speech = b"\x01\x00" * 320
     silence = bytes(640)
-    with TestClient(app).websocket_connect(f"/ws?token={token('complete-turn')}") as socket:
-        assert socket.receive_json()["type"] == "ready"
+    with TestClient(app).websocket_connect("/ws") as socket:
+        authenticate(socket, "complete-turn")
         socket.send_bytes(speech)
         for _ in range(30):
             socket.send_bytes(silence)
@@ -106,8 +113,8 @@ def test_interruption_cancels_playback_within_250ms() -> None:
         classifier=energy_classifier,
         now=lambda: 1_700_000_001,
     )
-    with TestClient(app).websocket_connect(f"/ws?token={token('interrupt-turn')}") as socket:
-        assert socket.receive_json()["type"] == "ready"
+    with TestClient(app).websocket_connect("/ws") as socket:
+        authenticate(socket, "interrupt-turn")
         socket.send_text(json.dumps({"type": "text_input", "text": "Souls Food UK at E4 6SY"}))
         receive_until(socket, "audio_start")
         assert socket.receive()["bytes"]
@@ -117,3 +124,29 @@ def test_interruption_cancels_playback_within_250ms() -> None:
         elapsed = time.perf_counter() - started
         assert events[-1]["reason"] == "user_speech"
         assert elapsed < 0.25
+
+
+def test_rejects_query_string_token() -> None:
+    app = create_voice_app(
+        GatewayServices(FakeTranscriber(), FakeAgent(), FakeSynthesizer()),
+        SECRET,
+        now=lambda: 1_700_000_001,
+    )
+    with TestClient(app).websocket_connect(f"/ws?token={token('query-token')}") as socket:
+        socket.send_json({"type": "ping"})
+        with pytest.raises(WebSocketDisconnect) as caught:
+            socket.receive_json()
+    assert caught.value.code == 4401
+
+
+def test_closes_connections_that_do_not_authenticate() -> None:
+    app = create_voice_app(
+        GatewayServices(FakeTranscriber(), FakeAgent(), FakeSynthesizer()),
+        SECRET,
+        now=lambda: 1_700_000_001,
+        auth_timeout_seconds=0.01,
+    )
+    with TestClient(app).websocket_connect("/ws") as socket:
+        with pytest.raises(WebSocketDisconnect) as caught:
+            socket.receive_json()
+    assert caught.value.code == 4408

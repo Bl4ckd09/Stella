@@ -8,7 +8,7 @@ app = modal.App("stella-voxtral-gateway")
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .uv_pip_install(
-        "fastapi==0.116.1",
+        "fastapi==0.140.13",
         "httpx==0.28.1",
         "mistralai[realtime]==2.4.5",
         "websockets==15.0.1",
@@ -94,20 +94,17 @@ def gateway():
 
     session_secret = os.environ["VOICE_SESSION_SECRET"]
     security_mode = os.environ.get("VOICE_SECURITY_MODE", "supabase")
-    replay_consumer = None
-    if security_mode == "supabase":
-        redeemer = SupabaseSessionRedeemer(
-            os.environ.get("SUPABASE_URL") or os.environ["NEXT_PUBLIC_SUPABASE_URL"],
-            os.environ["SUPABASE_SERVICE_ROLE_KEY"],
-            session_secret,
-        )
-        replay_consumer = redeemer.consume
-    elif security_mode != "memory":
+    if security_mode != "supabase":
         raise ValueError(f"Unsupported VOICE_SECURITY_MODE: {security_mode}")
+    redeemer = SupabaseSessionRedeemer(
+        os.environ.get("SUPABASE_URL") or os.environ["NEXT_PUBLIC_SUPABASE_URL"],
+        os.environ["SUPABASE_SERVICE_ROLE_KEY"],
+        session_secret,
+    )
 
     return create_voice_app(
         services,
         session_secret=session_secret,
         allowed_origin=stella_url,
-        replay_consumer=replay_consumer,
+        replay_consumer=redeemer.consume,
     )

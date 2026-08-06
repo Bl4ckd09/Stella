@@ -35,7 +35,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: voice/requirements-dev.txt
+          cache-dependency-path: voice/requirements-lock.txt
 
       - name: Install Node.js dependencies
         run: npm ci
@@ -43,7 +43,18 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m venv .venv
-          .venv/bin/python -m pip install -r voice/requirements-dev.txt
+          .venv/bin/python -m pip install --require-hashes -r voice/requirements-lock.txt
+          .venv/bin/python -m pip install pip-audit==2.10.1
+
+      - name: Audit Node.js dependencies
+        run: npm audit --audit-level=high
+
+      - name: Audit Python dependencies
+        run: >-
+          .venv/bin/python -m pip_audit
+          -r voice/requirements-lock.txt
+          --no-deps
+          --disable-pip
 
       - name: Run TypeScript tests
         run: npm test

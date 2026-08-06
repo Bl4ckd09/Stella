@@ -27,3 +27,14 @@
 - Added a Vercel production workflow that runs only after successful default-branch CI.
 - Created the GitHub `production` environment and set `VERCEL_DEPLOY_ENABLED=false`.
 - Kept Modal outside CI and kept Vercel deployment disabled until credentials exist.
+
+## 2026-08-06
+
+- Upgraded Next, React, Vitest, FastAPI, pytest, and dotenv to patched releases.
+- Added a hashed Python lock and dependency audits to CI.
+- Removed voice session tokens from WebSocket URLs.
+- Added first-frame authentication with a three-second timeout.
+- Trusted Vercel client headers only on Vercel and required the configured Stella origin.
+- Rejected memory-backed voice security in production and Modal.
+- Passed 1,505 TypeScript tests, 17 Python tests, both audits, typecheck, and the production build.
+- Kept Vercel deployment disabled and did not deploy Modal.

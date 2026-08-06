@@ -10,11 +10,11 @@ import httpx
 import websockets
 
 
-def websocket_endpoint(base_url: str, token: str) -> str:
+def websocket_endpoint(base_url: str) -> str:
     parsed = urlparse(base_url)
     scheme = "wss" if parsed.scheme in ("https", "wss") else "ws"
     path = parsed.path if parsed.path not in ("", "/") else "/ws"
-    return urlunparse((scheme, parsed.netloc, path, "", f"token={token}", ""))
+    return urlunparse((scheme, parsed.netloc, path, "", "", ""))
 
 
 async def session(app_url: str) -> dict:
@@ -29,11 +29,12 @@ async def session(app_url: str) -> dict:
 
 async def smoke(app_url: str, text: str, expected: str) -> None:
     voice_session = await session(app_url)
-    endpoint = websocket_endpoint(voice_session["gateway_url"], voice_session["token"])
+    endpoint = websocket_endpoint(voice_session["gateway_url"])
     sent_at = time.perf_counter()
     first_audio_at = None
     reply = None
     async with websockets.connect(endpoint, origin=app_url.rstrip("/")) as socket:
+        await socket.send(json.dumps({"type": "auth", "token": voice_session["token"]}))
         ready = json.loads(await socket.recv())
         if ready.get("type") != "ready":
             raise RuntimeError("Gateway did not become ready")

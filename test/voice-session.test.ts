@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { POST } from "../src/app/api/voice/session/route";
 import { issueVoiceToken, isSameOrigin, verifyVoiceToken } from "../src/lib/voiceSession";
@@ -7,13 +7,22 @@ import { clearVoiceSecurityMemoryForTests, hashVoiceSecurityValue } from "../src
 const SECRET = "0123456789abcdef0123456789abcdef";
 const TOKEN_VECTOR = "v1.eyJhdWQiOiJzdGVsbGEtdm94dHJhbC1nYXRld2F5IiwiZXhwIjoxNzAwMDAwMDYwLCJpYXQiOjE3MDAwMDAwMDAsImp0aSI6InRlc3Qtc2Vzc2lvbiIsInYiOjF9.aMMZotf06Pfw-p9TE2oo7RDxp69zQp-Yx0njZ1rRIQI";
 
+beforeEach(() => {
+  process.env.STELLA_APP_URL = "https://stella.example.com";
+  process.env.VERCEL = "1";
+});
+
 afterEach(() => {
   delete process.env.VOICE_SESSION_SECRET;
   delete process.env.VOXTRAL_GATEWAY_URL;
   delete process.env.VOICE_SECURITY_MODE;
   delete process.env.SUPABASE_URL;
   delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+  delete process.env.STELLA_APP_URL;
+  delete process.env.VERCEL;
+  delete process.env.TRUST_PROXY_HEADERS;
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   clearVoiceSecurityMemoryForTests();
 });
 
@@ -34,7 +43,7 @@ describe("voice session tokens", () => {
     process.env.VOXTRAL_GATEWAY_URL = "https://gateway.example.com";
     const request = new NextRequest("https://stella.example.com/api/voice/session", {
       method: "POST",
-      headers: { host: "stella.example.com", origin: "https://attacker.example.com", "x-forwarded-for": "test-cross" },
+      headers: { host: "stella.example.com", origin: "https://attacker.example.com", "x-vercel-forwarded-for": "test-cross" },
     });
     expect((await POST(request)).status).toBe(403);
   });
@@ -43,7 +52,7 @@ describe("voice session tokens", () => {
     process.env.VOXTRAL_GATEWAY_URL = "https://gateway.example.com";
     const request = new NextRequest("https://stella.example.com/api/voice/session", {
       method: "POST",
-      headers: { host: "stella.example.com", origin: "https://stella.example.com", "x-forwarded-for": "test-config" },
+      headers: { host: "stella.example.com", origin: "https://stella.example.com", "x-vercel-forwarded-for": "test-config" },
     });
     expect((await POST(request)).status).toBe(503);
   });
@@ -53,7 +62,7 @@ describe("voice session tokens", () => {
     process.env.VOXTRAL_GATEWAY_URL = "https://gateway.example.com";
     const request = new NextRequest("https://stella.example.com/api/voice/session", {
       method: "POST",
-      headers: { host: "stella.example.com", origin: "https://stella.example.com", "x-forwarded-for": "test-ok" },
+      headers: { host: "stella.example.com", origin: "https://stella.example.com", "x-vercel-forwarded-for": "test-ok" },
     });
     const response = await POST(request);
     const body = await response.json();
@@ -74,7 +83,7 @@ describe("voice session tokens", () => {
     process.env.VOICE_SECURITY_MODE = "memory";
     const request = () => new NextRequest("https://stella.example.com/api/voice/session", {
       method: "POST",
-      headers: { host: "stella.example.com", origin: "https://stella.example.com", "x-forwarded-for": "203.0.113.9" },
+      headers: { host: "stella.example.com", origin: "https://stella.example.com", "x-vercel-forwarded-for": "203.0.113.9" },
     });
     for (let index = 0; index < 10; index += 1) {
       expect((await POST(request())).status).toBe(200);
@@ -103,7 +112,12 @@ describe("voice session tokens", () => {
     vi.stubGlobal("fetch", fetchMock);
     const request = new NextRequest("https://stella.example.com/api/voice/session", {
       method: "POST",
-      headers: { host: "stella.example.com", origin: "https://stella.example.com", "x-forwarded-for": "203.0.113.10" },
+      headers: {
+        host: "stella.example.com",
+        origin: "https://stella.example.com",
+        "x-forwarded-for": "198.51.100.99",
+        "x-vercel-forwarded-for": "203.0.113.10",
+      },
     });
 
     expect((await POST(request)).status).toBe(200);
@@ -111,8 +125,27 @@ describe("voice session tokens", () => {
     const rateBody = String(fetchMock.mock.calls[0][1]?.body);
     const tokenBody = String(fetchMock.mock.calls[1][1]?.body);
     expect(rateBody).not.toContain("203.0.113.10");
+    expect(rateBody).not.toContain("198.51.100.99");
     expect(tokenBody).not.toContain("test-session");
-    expect(rateBody).toMatch(/[a-f0-9]{64}/);
+    expect(rateBody).toContain(hashVoiceSecurityValue(SECRET, "rate", "203.0.113.10"));
+    expect(rateBody).not.toContain(hashVoiceSecurityValue(SECRET, "rate", "198.51.100.99"));
     expect(tokenBody).toMatch(/[a-f0-9]{64}/);
+  });
+
+  it("rejects memory security in production", async () => {
+    process.env.VOICE_SESSION_SECRET = SECRET;
+    process.env.VOXTRAL_GATEWAY_URL = "https://gateway.example.com";
+    process.env.VOICE_SECURITY_MODE = "memory";
+    vi.stubEnv("NODE_ENV", "production");
+    const request = new NextRequest("https://stella.example.com/api/voice/session", {
+      method: "POST",
+      headers: {
+        host: "stella.example.com",
+        origin: "https://stella.example.com",
+        "x-vercel-forwarded-for": "203.0.113.11",
+      },
+    });
+
+    expect((await POST(request)).status).toBe(503);
   });
 });

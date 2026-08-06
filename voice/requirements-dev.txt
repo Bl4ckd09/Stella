@@ -1,8 +1,8 @@
-fastapi==0.116.1
+fastapi==0.140.13
 httpx==0.28.1
 mistralai[realtime]==2.4.5
-pytest==8.4.1
-pytest-asyncio==1.1.0
-python-dotenv==1.1.1
+pytest==9.0.3
+pytest-asyncio==1.4.0
+python-dotenv==1.2.2
 websockets==15.0.1
 webrtcvad-wheels==2.0.14

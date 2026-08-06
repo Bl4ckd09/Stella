@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { rateLimit } from "@/lib/ratelimit";
+import { configuredAppHost, trustedClientIp } from "@/lib/requestSecurity";
 
 // Run on the API surface + the private HQ console.
 export const config = { matcher: ["/api/:path*", "/hq", "/hq/:path*"] };
@@ -8,14 +9,6 @@ const WINDOW_MS = 60_000;
 const API_LIMIT = 30; // per IP/min for browser-facing API
 const VOICE_LIMIT = 120; // /api/voice-lookup is secret-gated → allow more
 const AGENTS_LIMIT = 600; // the Mission Control console ticks the loop frequently (same-origin)
-
-function clientIp(req: NextRequest): string {
-  return (
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    req.headers.get("x-real-ip") ||
-    "unknown"
-  );
-}
 
 function forbidden(reason: string) {
   return new NextResponse(JSON.stringify({ error: reason }), {
@@ -50,7 +43,7 @@ function authRequired() {
   });
 }
 
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   const path = req.nextUrl.pathname;
   // Both voice webhooks (/api/voice-lookup, /api/voice-letter) are server-to-
   // server calls from ElevenLabs, gated by their own X-Tool-Secret header and
@@ -62,7 +55,7 @@ export function middleware(req: NextRequest) {
   const isCron = path === "/api/agents/cron";
   const isHq = path === "/hq" || path.startsWith("/hq/");
   const isPrivate = isHq || (isAgents && !isCron);
-  const ip = clientIp(req);
+  const ip = trustedClientIp(req);
 
   // 1) Rate limit per IP.
   const bucket = isVoice ? "voice" : isAgents ? "agents" : "api";
@@ -83,7 +76,7 @@ export function middleware(req: NextRequest) {
   //    by its own X-Tool-Secret header — exempt it here.
   if (!isVoice && req.method === "POST") {
     const origin = req.headers.get("origin");
-    const host = req.headers.get("host");
+    const host = configuredAppHost() || req.headers.get("host");
     if (!origin) return forbidden("cross_origin_blocked");
     try {
       if (new URL(origin).host !== host) return forbidden("cross_origin_blocked");

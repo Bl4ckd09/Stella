@@ -16,6 +16,7 @@ from .tokens import ReplayGuard, TokenClaims, TokenError, verify_token
 from .vad import TurnDetector, VadConfig
 
 AUDIO_QUEUE_MAX_FRAMES = 250
+AUTH_TIMEOUT_SECONDS = 3.0
 ReplayConsumer = Callable[[TokenClaims, int], bool | Awaitable[bool]]
 
 
@@ -42,6 +43,7 @@ def create_voice_app(
     classifier: Callable[[bytes, int], bool] | None = None,
     now: Callable[[], int] | None = None,
     replay_consumer: ReplayConsumer | None = None,
+    auth_timeout_seconds: float = AUTH_TIMEOUT_SECONDS,
 ) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     metric_sink = metrics or StructuredMetrics()
@@ -59,9 +61,31 @@ def create_voice_app(
         if expected_origin and (websocket.headers.get("origin") or "").rstrip("/") != expected_origin:
             await websocket.close(code=4403, reason="origin_rejected")
             return
+
+        await websocket.accept()
         try:
-            claims = verify_token(websocket.query_params.get("token", ""), session_secret, now=clock())
-        except TokenError:
+            raw_auth = await asyncio.wait_for(
+                websocket.receive_text(),
+                timeout=auth_timeout_seconds,
+            )
+        except TimeoutError:
+            await websocket.close(code=4408, reason="auth_timeout")
+            return
+        except WebSocketDisconnect:
+            return
+
+        try:
+            auth_event = json.loads(raw_auth)
+            if (
+                not isinstance(auth_event, dict)
+                or set(auth_event) != {"type", "token"}
+                or auth_event.get("type") != "auth"
+                or not isinstance(auth_event.get("token"), str)
+                or len(auth_event["token"]) > 2_048
+            ):
+                raise TokenError("invalid_voice_token")
+            claims = verify_token(auth_event["token"], session_secret, now=clock())
+        except (json.JSONDecodeError, TokenError):
             await websocket.close(code=4401, reason="invalid_token")
             return
         try:
@@ -75,7 +99,6 @@ def create_voice_app(
             await websocket.close(code=4409, reason="token_reused")
             return
 
-        await websocket.accept()
         session_id = claims.jti
         metric_sink.record(
             session_id,

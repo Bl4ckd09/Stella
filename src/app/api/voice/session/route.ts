@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isSameOrigin, issueVoiceToken, VOICE_TOKEN_TTL_SECONDS } from "@/lib/voiceSession";
 import { consumeVoiceSessionRateLimit, registerVoiceSessionToken } from "@/lib/voiceSecurity";
+import { configuredAppHost, trustedClientIp } from "@/lib/requestSecurity";
 
 export const runtime = "nodejs";
 
-function clientIp(req: NextRequest): string {
-  return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown";
-}
-
 export async function POST(req: NextRequest) {
-  const host = req.headers.get("x-forwarded-host") || req.headers.get("host");
+  const host = configuredAppHost();
+  if (!host) {
+    return NextResponse.json({ error: "voice_unavailable" }, { status: 503 });
+  }
   if (!isSameOrigin(req.headers.get("origin"), host)) {
     return NextResponse.json({ error: "cross_origin_blocked" }, { status: 403 });
   }
@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const rate = await consumeVoiceSessionRateLimit(clientIp(req), secret);
+    const rate = await consumeVoiceSessionRateLimit(trustedClientIp(req), secret);
     if (!rate.allowed) {
       return NextResponse.json(
         { error: "rate_limited" },

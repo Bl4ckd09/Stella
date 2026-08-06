@@ -17,7 +17,11 @@ const RATE_WINDOW_SECONDS = 60;
 
 function mode(): "memory" | "supabase" {
   const configured = process.env.VOICE_SECURITY_MODE;
-  if (configured === "memory" || configured === "supabase") return configured;
+  if (configured === "memory") {
+    if (process.env.NODE_ENV === "production") throw new Error("voice_security_unavailable");
+    return "memory";
+  }
+  if (configured === "supabase") return configured;
   return process.env.NODE_ENV === "test" ? "memory" : "supabase";
 }
 
