@@ -1,3 +1,8 @@
+> **Winner, Vercel "Built in London" hackathon.**
+> <https://community.vercel.com/hackathons/built-in-london/winners>
+>
+> Frozen submission. Current code lives on `voxtral-hosted`.
+
 # Stella — Unclaimed Business Money Engine (cloud rebuild)
 
 Helps London small businesses find unclaimed **Small Business Rate Relief** and
