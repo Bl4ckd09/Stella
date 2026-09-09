@@ -230,10 +230,3 @@ scripts/             load-voa.ts, load-companies.ts, load-boroughs.ts
 elevenlabs/          agent-prompt.md, tool definition, create-agent.sh, provision-twilio.sh
 test/                agents.* (runtime), relief/grants parity, fixtures/
 ```
-
-## Claude Code integration
-
-Stella exposes its deterministic lookup, relief and grant engines through `.mcp.json` and `scripts/mcp-server.ts`.
-Claude Code loads the `stella-agent-cycle` skill to run one compliant workforce cycle.
-Run `npm run cycle -- "SW1A 1AA"` for a non-interactive cycle, or omit the postcode to use the default.
-All monetary figures remain exact engine output and require council confirmation.
