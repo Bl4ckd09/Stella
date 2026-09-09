@@ -117,7 +117,7 @@ export async function boroughContact(borough: string): Promise<BoroughContact | 
 
 /** Persist a lookup (web or phone) for analytics / follow-up. Best-effort. */
 export async function logLookup(entry: {
-  channel: "web" | "phone";
+  channel: "web" | "phone" | "web-voice";
   query?: string;
   postcode?: string;
   uarn?: string;

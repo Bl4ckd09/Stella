@@ -9,3 +9,4 @@ data/BasicCompanyData*.csv
 data/BasicCompanyData*.zip
 data/*.db
 .vercel
+.env*

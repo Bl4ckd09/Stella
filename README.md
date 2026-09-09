@@ -51,7 +51,7 @@ branch):
 - **Cross-session experience memory** (`memory.ts`) — the workforce records
   outcomes and recalls them at decision time via `text-embedding-v4` +
   `qwen3-rerank`, with cosine and recency fallbacks.
-- **13 new tests** (1,490 total, green) and a live end-to-end Qwen smoke script.
+- **16 new tests** (1,493 total, green) and a live end-to-end Qwen smoke script.
 
 ---
 
@@ -138,7 +138,7 @@ See [`.env.local.example`](./.env.local.example) for all options.
 ```bash
 npm install
 npm run dev                 # open http://localhost:3000/hq → press "Go hands-off"
-npm test                    # 1,477 tests (engine parity + agent runtime)
+npm test                    # 1,493 tests (engine parity + agent runtime + voice route)
 ```
 
 - **No keys needed** for the core demo — the workforce runs on the deterministic
@@ -163,8 +163,13 @@ the same engine and channels power a live web + phone product:
 
 - **Web** (`/`): owner types business name (+ postcode) → relief + grants + a
   streamed, ready-to-send claim letter.
-- **Phone**: owner calls an ElevenLabs voice agent and says their business name →
-  the agent reads back exactly what they can claim (figures from the engine).
+- **Web voice**: the default floating voice agent runs on Mistral Voxtral:
+  `voxtral-mini-latest` STT → `mistral-small-latest` tool-calling agent →
+  `voxtral-mini-tts-2603` TTS. The agent uses the same deterministic lookup and
+  letter tools, so every £ figure still comes from the engine.
+- **Phone**: the ElevenLabs Conversational AI + Twilio phone path is retained for
+  callers. Set `NEXT_PUBLIC_VOICE_PROVIDER=elevenlabs` to restore the old
+  ElevenLabs Convai web widget.
 
 ### Stack
 
@@ -174,6 +179,7 @@ the same engine and channels power a live web + phone product:
 | Engine | **TypeScript** (`src/lib/engines/`) — parity-tested port of the Python original |
 | Data | **Supabase Postgres** (`pg_trgm` fuzzy name search; 311k VOA + 5.6M Companies House rows) |
 | LLM (prose) | **Claude** by default; any OpenAI-compatible endpoint (Modal/Nebius/…) via the tier seam |
+| Web voice | **Mistral Voxtral** STT/TTS + `mistral-small-latest` tool calling |
 | Phone | **ElevenLabs** Conversational AI + **Twilio** |
 
 ### Local development (full product, with data)
@@ -205,8 +211,9 @@ Fill `.env.local` (and the same vars in Vercel → Settings → Env):
    vars above.
 4. **Vercel**: import the repo, add env vars, deploy. SSE + agent routes have
    `maxDuration` set.
-5. **ElevenLabs / Twilio** (voice): `cd elevenlabs && … ./create-agent.sh` then
-   `./provision-twilio.sh`. Set `VOICE_TOOL_SECRET` in both Vercel and the
+5. **Voice**: set `MISTRAL_API_KEY` for the default web voice agent. For the
+   phone path, `cd elevenlabs && … ./create-agent.sh` then
+   `./provision-twilio.sh`; set `VOICE_TOOL_SECRET` in both Vercel and the
    ElevenLabs tool header.
 6. **Outbound (optional, live)**: `STELLA_LIVE_OUTBOUND=true` + the channel creds
    (ElevenLabs phone-number id, Wassist, Resend). Sandbox-simulated otherwise.
@@ -221,7 +228,8 @@ src/lib/engines/     relief.ts, grants.ts        (deterministic — parity-teste
 src/lib/             db.ts, lookup.ts, bizProfile.ts, sectors.ts
 src/app/hq/          the Mission Control console
 src/app/api/agents/  tick, dispatch, approve
-src/app/api/         lookup, biz-profile, letter, grant-application, grants, voice-lookup
+src/app/api/         lookup, biz-profile, letter, grant-application, grants,
+                     mistral-voice, voice-lookup, voice-letter
 supabase/migrations/ 0001_init.sql, 0002_rls.sql
 scripts/             load-voa.ts, load-companies.ts, load-boroughs.ts
 elevenlabs/          agent-prompt.md, tool definition, create-agent.sh, provision-twilio.sh
