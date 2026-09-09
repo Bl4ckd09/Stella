@@ -1,20 +1,27 @@
-# Stella — a self-running business on Qwen Cloud
+# Stella - Unclaimed Business Money Engine
 
-**Global AI Hackathon Series with Qwen Cloud · Autopilot Agent track.**
+Finds unclaimed **Small Business Rate Relief** and grants for London small
+businesses. Three channels share one deterministic engine: web lookup, phone
+agent, and browser voice.
 
-Stella automates a real UK business workflow end-to-end: a workforce of seven
-AI agents sources unclaimed **Small Business Rate Relief** for London SMBs,
-scans and qualifies each against a deterministic engine, sells compliantly,
-prepares the paid work, files council applications, and books revenue — while a
-human only supervises a Mission Control console (and holds a kill switch).
+This is the trunk. It is not a hackathon submission. Each submission is frozen
+on its own branch.
 
-The reasoning layer runs entirely on **Qwen Cloud (Alibaba Cloud Model Studio)**:
-`qwen3.7-max` writes customer/council documents, `qwen3.6-flash` runs the agent
-loop and a **native function-calling planner**, and `text-embedding-v4` +
-`qwen3-rerank` power a **cross-session experience memory** so the workforce makes
-better decisions as history accumulates. See [docs/architecture.md](./docs/architecture.md)
-for the system diagram and [docs/alibaba-cloud-proof.md](./docs/alibaba-cloud-proof.md)
-for the Qwen API code pointers.
+| Branch | Event | Outcome |
+|---|---|---|
+| `cloud-rebuild` | Vercel "Built in London" | **Winner** |
+| `qwen-cloud` | Qwen Cloud, Autopilot Agent track | submitted |
+| `autonomous-agents` | Cursor "Hands Off" London | submitted |
+| `voxtral-web` | Mistral Voxtral browser voice | prototype |
+| `claude-code-integration` | Claude Code MCP server and skill | merged here |
+| `wip/mistral-browser-voice` | superseded browser voice widget | unmerged |
+| `main` | NVIDIA DGX on-device build | unrelated history |
+
+Seed data and the deliberately excluded Companies House bulk file are documented
+in [data/README.md](./data/README.md).
+
+Open **`/hq`**, press **Go hands-off**, and walk away.
+
 
 Open **`/hq`**, press **▶ Go hands-off**, and walk away.
 
