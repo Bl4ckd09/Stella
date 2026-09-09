@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     branches:
-      - autonomous-agents
+      - voxtral-hosted
   workflow_dispatch:
 
 permissions:
