@@ -1,57 +1,23 @@
-# Stella — a self-running business on Qwen Cloud
+> **Cursor "Hands Off" London hackathon submission.**
+> <https://luma.com/wl7a90xe>
+>
+> Frozen submission. Current code lives on `voxtral-hosted`.
 
-**Global AI Hackathon Series with Qwen Cloud · Autopilot Agent track.**
+# Stella — a self-running business operated by AI agents
 
-Stella automates a real UK business workflow end-to-end: a workforce of seven
-AI agents sources unclaimed **Small Business Rate Relief** for London SMBs,
-scans and qualifies each against a deterministic engine, sells compliantly,
-prepares the paid work, files council applications, and books revenue — while a
-human only supervises a Mission Control console (and holds a kill switch).
+Stella finds unclaimed UK **Small Business Rate Relief** for London SMBs. This
+branch turns that product into a **self-running business**: a workforce of seven
+AI agents sources prospects, scans them, qualifies, sells, prepares the paid
+work, files council applications, and books revenue — while a human only
+supervises a Mission Control console (and holds a kill switch).
 
-The reasoning layer runs entirely on **Qwen Cloud (Alibaba Cloud Model Studio)**:
-`qwen3.7-max` writes customer/council documents, `qwen3.6-flash` runs the agent
-loop and a **native function-calling planner**, and `text-embedding-v4` +
-`qwen3-rerank` power a **cross-session experience memory** so the workforce makes
-better decisions as history accumulates. See [docs/architecture.md](./docs/architecture.md)
-for the system diagram and [docs/alibaba-cloud-proof.md](./docs/alibaba-cloud-proof.md)
-for the Qwen API code pointers.
-
-Open **`/hq`**, press **▶ Go hands-off**, and walk away.
+Built for the Cursor **"Hands Off"** hackathon. Open **`/hq`**, press
+**▶ Go hands-off**, and walk away.
 
 > **Sacred rule:** every £ figure is computed by the deterministic relief engine
 > (1,441 parity tests). Agents reason and write prose — they never invent, alter,
 > or recalculate money, and a compliance guard blocks any £ that doesn't trace to
-> the engine.
-
-## Built on Qwen Cloud
-
-| Concern | Qwen model | Where |
-|---|---|---|
-| Customer/council artifacts (quality tier) | `qwen3.7-max` | `src/lib/llm.ts` |
-| Agent-loop reasoning (fast tier) | `qwen3.6-flash` | `src/lib/llm.ts` |
-| Ada's next-action planner | `qwen3.6-flash` + native function calling | `src/lib/agents/planner.ts` |
-| Experience-memory embeddings | `text-embedding-v4` | `src/lib/agents/memory.ts` |
-| Memory recall ranking | `qwen3-rerank` | `src/lib/agents/memory.ts` |
-
-OpenAI-compatible via `dashscope-intl.aliyuncs.com/compatible-mode/v1` (Singapore /
-International). The provider seam is two-tier and model-agnostic; thinking-mode is
-forced off on the loop and a 429-retry rides out the account-wide rate limit.
-
-### What changed during the submission period
-
-Stella began as a Cursor "Hands Off" entry; for this hackathon it was
-**significantly updated to be Qwen-native** (all commits on the `qwen-cloud`
-branch):
-
-- **Two-tier port to Qwen Cloud** — both LLM tiers now run on Qwen models over
-  the DashScope OpenAI-compatible endpoint, with DashScope-specific hardening.
-- **Native function-calling planner** (`planner.ts`) — Ada chooses the next
-  action via a Qwen `tools` call among pre-vetted candidates, not prompt-parsed
-  prose; null-safe fallback to the deterministic order.
-- **Cross-session experience memory** (`memory.ts`) — the workforce records
-  outcomes and recalls them at decision time via `text-embedding-v4` +
-  `qwen3-rerank`, with cosine and recency fallbacks.
-- **13 new tests** (1,490 total, green) and a live end-to-end Qwen smoke script.
+> the engine. See [HACKATHON.md](./HACKATHON.md) for the judging-criteria map.
 
 ---
 
