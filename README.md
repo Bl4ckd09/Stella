@@ -20,9 +20,6 @@ on its own branch.
 Seed data and the deliberately excluded Companies House bulk file are documented
 in [data/README.md](./data/README.md).
 
-Open **`/hq`**, press **Go hands-off**, and walk away.
-
-
 Open **`/hq`**, press **▶ Go hands-off**, and walk away.
 
 > **Sacred rule:** every £ figure is computed by the deterministic relief engine
