@@ -9,7 +9,7 @@ on its own branch.
 
 | Branch | Event | Outcome |
 |---|---|---|
-| `cloud-rebuild` | Vercel "Built in London" | **Winner** |
+| `vercel-hackathon` | Vercel "Built in London" | **Winner** |
 | `qwen-cloud` | Qwen Cloud, Autopilot Agent track | submitted |
 | `autonomous-agents` | Cursor "Hands Off" London | submitted |
 | `voxtral-web` | Mistral Voxtral browser voice | prototype |
