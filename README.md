@@ -1,20 +1,23 @@
-# Stella — a self-running business on Qwen Cloud
+# Stella - Claude Code integration (MCP server + skill)
 
-**Global AI Hackathon Series with Qwen Cloud · Autopilot Agent track.**
+Stella exposes its deterministic lookup, relief and grant engines to Claude Code
+over MCP, so an agent can run one compliant workforce cycle without a browser.
 
-Stella automates a real UK business workflow end-to-end: a workforce of seven
-AI agents sources unclaimed **Small Business Rate Relief** for London SMBs,
-scans and qualifies each against a deterministic engine, sells compliantly,
-prepares the paid work, files council applications, and books revenue — while a
-human only supervises a Mission Control console (and holds a kill switch).
+| File | Role |
+|---|---|
+| `.mcp.json` | registers the server with Claude Code |
+| `scripts/mcp-server.ts` | the MCP server over the lookup, relief and grant engines |
+| `scripts/headless-cycle.sh` | one non-interactive cycle via `claude -p` |
+| `.claude/skills/stella-agent-cycle/SKILL.md` | the skill that drives the cycle |
 
-The reasoning layer runs entirely on **Qwen Cloud (Alibaba Cloud Model Studio)**:
-`qwen3.7-max` writes customer/council documents, `qwen3.6-flash` runs the agent
-loop and a **native function-calling planner**, and `text-embedding-v4` +
-`qwen3-rerank` power a **cross-session experience memory** so the workforce makes
-better decisions as history accumulates. See [docs/architecture.md](./docs/architecture.md)
-for the system diagram and [docs/alibaba-cloud-proof.md](./docs/alibaba-cloud-proof.md)
-for the Qwen API code pointers.
+Run `npm run mcp` to start the server, or `npm run cycle -- "SW1A 1AA"` for a
+single headless cycle. Omit the postcode to use the default.
+
+All monetary figures stay exact engine output and require council confirmation.
+
+> Merged into `voxtral-hosted` on 2026-09-09 (a63775a). Kept as the reference
+> point for the integration. Not a hackathon submission.
+
 
 Open **`/hq`**, press **▶ Go hands-off**, and walk away.
 
