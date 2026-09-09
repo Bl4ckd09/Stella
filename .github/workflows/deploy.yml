@@ -7,7 +7,7 @@ on:
     types:
       - completed
     branches:
-      - autonomous-agents
+      - voxtral-hosted
 
 permissions:
   contents: read
