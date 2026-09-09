@@ -1,3 +1,10 @@
+> **Work in progress, not merged.** The browser Mistral voice widget that the
+> Voxtral agent replaced (62557dc). Kept for reference only.
+>
+> Files: `src/lib/mistralVoice.ts`, `src/components/MistralVoiceWidget.tsx`,
+> `src/app/api/mistral-voice/route.ts`, `test/mistral-voice.route.test.ts`.
+> Current code lives on `voxtral-hosted`.
+
 # Stella — a self-running business on Qwen Cloud
 
 **Global AI Hackathon Series with Qwen Cloud · Autopilot Agent track.**
