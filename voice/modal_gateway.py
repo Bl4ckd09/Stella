@@ -10,7 +10,7 @@ image = (
     .uv_pip_install(
         "fastapi==0.140.13",
         "httpx==0.28.1",
-        "mistralai[realtime]==2.4.5",
+        "mistralai[realtime]==3.7.0",
         "websockets==15.0.1",
         "webrtcvad-wheels==2.0.14",
     )
